@@ -23,3 +23,16 @@ playground/*
 scratch/*
 tests/fixtures/captured/*
 !tests/fixtures/captured/poc_walk_run.json
+
+# Paceboard
+data/
+# The retired Sites dashboard keeps its own nested .git repository, so the outer
+# repository leaves it alone rather than embedding it. Its history lives there.
+legacy/paceboard-sites-dashboard/
+data/
+.e2e/
+dashboard/dist/
+dashboard/node_modules/
+dashboard/tsconfig.tsbuildinfo
+dashboard/playwright-report/
+dashboard/test-results/

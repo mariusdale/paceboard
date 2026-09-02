@@ -1,0 +1,60 @@
+import json
+
+import pytest
+
+import paceboard_mcp
+
+
+class FakeResponse:
+    def __init__(self, body, status_code=200):
+        self._body = body
+        self.status_code = status_code
+        self.ok = status_code < 400
+        self.text = json.dumps(body)
+
+    def json(self):
+        return self._body
+
+
+def test_sync_fitness_data_posts_snapshot(monkeypatch):
+    observed = {}
+
+    def fake_post(url, headers, json, timeout):
+        observed.update(url=url, headers=headers, json=json, timeout=timeout)
+        return FakeResponse({"ok": True, "activities_upserted": 1})
+
+    monkeypatch.setenv("PACEBOARD_URL", "https://paceboard.example/")
+    monkeypatch.setenv("PACEBOARD_INGEST_KEY", "test-key")
+    monkeypatch.setattr(paceboard_mcp.requests, "post", fake_post)
+
+    result = json.loads(paceboard_mcp.sync_fitness_data(
+        "strava", [{"id": 42, "name": "Lunch run"}], {"athlete": {"id": 7}}
+    ))
+
+    assert result["ok"] is True
+    assert observed["url"] == "https://paceboard.example/api/ingest"
+    assert observed["headers"]["Authorization"] == "Bearer test-key"
+    assert observed["json"]["source"] == "strava"
+
+
+def test_sync_fitness_data_rejects_oversized_snapshot():
+    with pytest.raises(ValueError, match="at most 250"):
+        paceboard_mcp.sync_fitness_data("garmin", [{"id": i} for i in range(251)])
+
+
+def test_get_paceboard_status_summarizes_sources(monkeypatch):
+    monkeypatch.setenv("PACEBOARD_URL", "http://localhost:3000")
+    monkeypatch.delenv("PACEBOARD_INGEST_KEY", raising=False)
+    monkeypatch.setattr(
+        paceboard_mcp.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse({
+            "activities": [{"id": "a"}, {"id": "b"}],
+            "sources": {"garmin": {"activity_count": 2, "synced_at": "2026-09-01T00:00:00Z"}},
+        }),
+    )
+
+    result = json.loads(paceboard_mcp.get_paceboard_status())
+    assert result["status"] == "connected"
+    assert result["activity_count"] == 2
+    assert result["sources"]["garmin"]["activity_count"] == 2

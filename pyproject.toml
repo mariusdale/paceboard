@@ -18,12 +18,29 @@ dependencies = [
     "fitparse>=1.2.0",
 ]
 
+[project.optional-dependencies]
+# Paceboard backend. Kept as an extra so the Garmin MCP server alone stays a
+# light install: `uv sync` gives you the MCP server, `uv sync --extra paceboard`
+# adds the analytics backend.
+paceboard = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "SQLAlchemy>=2.0.36",
+    "alembic>=1.14",
+    "APScheduler>=3.11,<4",
+    "httpx>=0.28",
+    "cryptography>=44.0",
+]
+
 [project.scripts]
 garmin-mcp = "garmin_mcp:main"
 garmin-mcp-auth = "garmin_mcp.auth_cli:main"
+paceboard-api = "paceboard_api.cli:main"
+paceboard-mcp = "paceboard_api.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/garmin_mcp"]
+packages = ["src/garmin_mcp", "src/paceboard_api"]
 
 [tool.uv]
 dev-dependencies = [
@@ -31,5 +48,10 @@ dev-dependencies = [
     "pytest-asyncio>=0.25.2",
     "pytest-mock>=3.14.0",
     "pytest-timeout>=2.3.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "SQLAlchemy>=2.0.36",
+    "alembic>=1.14",
+    "APScheduler>=3.11,<4",
+    "cryptography>=44.0",
 ]
-

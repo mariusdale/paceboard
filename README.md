@@ -1,964 +1,698 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/taxuspt-garmin-mcp-badge.png)](https://mseep.ai/app/taxuspt-garmin-mcp)
+# Paceboard
 
-# Garmin MCP Server
+A local-first personal fitness analytics application. It continuously ingests
+your Garmin and Strava data into a SQLite database on your own machine,
+normalizes it, derives training and recovery analytics from it, and serves it to
+a dense React dashboard through a local REST API.
 
-This Model Context Protocol (MCP) server connects to Garmin Connect and exposes your fitness and health data to Claude and other MCP-compatible clients.
+Nothing about the data pipeline depends on an LLM. Claude and MCP are optional
+interfaces *on top of* the resulting database — Paceboard ships a read-only MCP
+server for exactly that — but they are never the thing that moves data.
 
-Garmin's API is accessed via the awesome [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library.
-
-## Features
-
-- List recent activities with pagination support
-- Get detailed activity information
-- Edit activities: name, type, description/notes, event type, perceived effort (RPE), and feel
-- Access health metrics (steps, heart rate, sleep, stress, respiration)
-- View body composition data
-- Track training status and readiness
-- Access cycling FTP and lactate threshold metrics
-- Manage gear and equipment, including free-text notes returned by `get_gear`
-- Access workouts and training plans
-- Inspect detailed workout step structures, including repeat groups and swim pace targets
-- Weekly health aggregates (steps, stress, intensity minutes)
-- Advanced cycling analytics: power zones, FIT file analysis, DI2 electronic shift intelligence
-- Training load trend (CTL/ATL/TSB), HRV trend, VO2 max trend, respiration rate trend
-- Power Duration Curve, climb detection with VAM, cardiac drift (aerobic decoupling), W/kg calculations
-
-### Tool Coverage
-
-This MCP server implements **110+ tools** covering ~90% of the [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library (v0.3.2):
-
-- ✅ Activity Management (20 tools) - includes write tools for type, description, event type, perceived effort, and feel
-- ✅ Health & Wellness (31 tools) - includes custom lightweight summary tools
-- ✅ Training & Performance (13 tools) - includes CTL/ATL/TSB, HRV, VO2 max, and respiration trends
-- ✅ Workouts (8 tools)
-- ✅ Devices (7 tools)
-- ✅ Gear Management (5 tools)
-- ✅ Weight Tracking (5 tools)
-- ✅ Challenges & Badges (10 tools)
-- ✅ Nutrition (8 tools) - food logs, meals, custom foods, and food logging
-- ✅ Women's Health (3 tools)
-- ✅ User Profile (3 tools)
-- ✅ High-Level Workout Builders (4 tools) - create and schedule workouts without writing JSON
-- ✅ Courses (5 tools) - list / get details / upload GPX as course / download GPX / delete course
-- ✅ Activity Analysis (2 tools) - FIT file parsing, Power Duration Curve; requires power meter and/or Di2
-- ✅ Activity File Downloads (2 tools) - download activity files in FIT, GPX, TCX, or CSV format
-
-> **Note:** Activity Analysis tools require a compatible power meter (e.g., Garmin Rally, Favero Assioma, PowerTap P1) and/or Shimano Di2 / SRAM eTap electronic shifting. The `fitparse` dependency is installed automatically.
-
-### Gear Notes
-
-Each item in the `gear` array returned by `get_gear` includes a `notes` field
-containing the free-text Notes value shown in Garmin Connect. Gear without a
-Notes value returns `null`; all existing gear fields remain unchanged.
-
-### Activity File Downloads
-
-Two tools let you download a raw activity file to disk:
-
-- **`download_activity_file(activity_id, format="fit", output_dir=None)`** — downloads the activity and saves it to the configured directory. `format` accepts `fit` (default), `gpx`, `tcx`, or `csv`.
-- **`set_fit_download_dir(path)`** — sets and persists the default download directory (written to the config file).
-
-**Where files are saved (precedence):**
-
-1. `output_dir` argument — one-off override, not persisted.
-2. `GARMIN_FIT_DOWNLOAD_DIR` environment variable.
-3. Persisted config set via `set_fit_download_dir`.
-
-**First-run behavior:** if no directory is configured, `download_activity_file` returns `status: "needs_setup"`. The assistant will ask where you want to save files (suggesting the current directory as default), call `set_fit_download_dir` to persist your choice, and then retry the download automatically.
-
-### Intentionally Skipped Endpoints
-
-Some endpoints are not implemented due to performance or complexity considerations:
-
-**High Data Volume:**
-- `get_activity_details()` - Returns large GPS tracks and chart data (50KB-500KB). Use `get_activity()` for summaries instead.
-
-**Specialized Workout Formats:**
-- `upload_running_workout()`, `upload_cycling_workout()`, `upload_swimming_workout()` - Sport-specific workout uploads. Use `upload_workout()` for general workouts.
-
-**Maintenance & Destructive Operations:**
-- `delete_activity()`, `delete_blood_pressure()` - Destructive operations require careful consideration.
-- Internal/Auth methods: `login()`, `resume_login()`, `connectapi()`, `download()` - Handled automatically by the library.
-
-If you need any of these endpoints, please [open an issue](https://github.com/Taxuspt/garmin_mcp/issues).
-
-## Tool Filtering
-
-This server registers 110+ tools by default, which can be a lot of context for
-an LLM to carry in every session. You can expose only the tools you need with
-two optional environment variables:
-
-| Env var | Effect |
-|---|---|
-| `GARMIN_ENABLED_TOOLS` | Comma-separated **allowlist** — if set, *only* these tools are registered. |
-| `GARMIN_DISABLED_TOOLS` | Comma-separated **denylist** — listed tools are skipped. Ignored if an allowlist is set. |
-
-Tool names are case-insensitive. With neither variable set, all tools register
-(unchanged default behaviour). Names that match no tool are ignored with a
-warning on stderr, which makes typos easy to spot.
-
-Example — expose only sleep, stress, and recent activities:
-
-```json
-"env": {
-  "GARMIN_ENABLED_TOOLS": "get_sleep_data,get_stress_summary,get_activities"
-}
+```
+Garmin MCP (read-only) ──┐
+                          ├──▶ provider adapters ──▶ ingestion + scheduler
+Strava REST API ─────────┘                               │
+                                                         ├──▶ raw payload store
+                                                         ├──▶ normalized SQLite
+                                                         ├──▶ derived analytics
+                                                         └──▶ REST API (:8787)
+                                                                    │
+                                                          React dashboard (:3000)
 ```
 
-## High-level workout tools
-
-These builder tools let an LLM create and schedule workouts without writing raw Garmin JSON.
-
-### `create_walk_run_workout`
-
-Creates a walk/run interval workout with optional heart-rate zone target.
-
-```json
-{
-  "name": "W3 Mié 2:2",
-  "run_seconds": 120,
-  "walk_seconds": 120,
-  "repeats": 9,
-  "warmup_min": 10,
-  "cooldown_min": 8,
-  "hr_zone": "Z3"
-}
-```
-
-Returns: `{"status": "success", "workout_id": 1234567890, ...}`
-
-### `create_z2_walk_workout`
-
-Creates a steady Z2 walking workout.
-
-```json
-{
-  "name": "Z2 Walk 45m",
-  "duration_min": 45,
-  "hr_min": 110,
-  "hr_max": 130
-}
-```
-
-Returns: `{"status": "success", "workout_id": 1234567890, ...}`
-
-### `create_strength_workout`
-
-Creates a strength workout from a list of exercises. Each becomes a reps-based step, with the
-name kept in the step description. The name is also sent as `exerciseName`, but Garmin only
-retains that when it matches one of its own exercise keys (e.g. `FARMERS_CARRY`) — any other
-value is accepted and then stored empty.
-
-`category` is optional and passed straight through. Omit it and the key is left out of the
-payload entirely, which Garmin accepts. Supply it and it must be one of Garmin's exercise
-categories — anything else, including `OTHER` and `UNASSIGNED`, is rejected with
-`400 - Invalid category`. The full list is published at
-[`Exercises.json`](https://connect.garmin.com/web-data/exercises/Exercises.json).
-
-```json
-{
-  "name": "Full Body A",
-  "exercises": [
-    {"name": "Sentadillas", "sets": 3, "reps": 12, "rest_seconds": 90},
-    {"name": "Flexiones",   "sets": 3, "reps": 15, "rest_seconds": 60},
-    {"name": "Peso muerto", "sets": 3, "reps": 10, "rest_seconds": 90},
-    {"name": "Farmers Carry 40m", "sets": 3, "reps": 1, "rest_seconds": 90, "category": "CARRY"}
-  ]
-}
-```
-
-Returns: `{"status": "success", "workout_id": 1234567890, ...}`
-
-### `schedule_week`
-
-Schedules multiple workouts in one call.
-
-```json
-{
-  "week": [
-    {"date": "2026-05-12", "workout_id": 1234567890},
-    {"date": "2026-05-14", "workout_id": 1234567891}
-  ]
-}
-```
-
-Returns: `{"status": "complete", "scheduled": [...]}`
-
-### Full flow example
-
-```text
-create_walk_run_workout(name="W3 Mié 2:2", run_seconds=120, walk_seconds=120,
-                        repeats=9, warmup_min=10, cooldown_min=8)
-  → workout_id = 1560092011
-
-schedule_workout(workout_id=1560092011, date="2026-05-06")
-  → OK
-```
-
-After syncing your watch, the workout appears on the Forerunner 965 calendar.
-
-### Raw `upload_workout` end conditions
-
-When building custom workout JSON for `upload_workout` or `upload_workouts`, the
-`endCondition.conditionTypeId` and `endCondition.conditionTypeKey` must match
-Garmin's canonical mapping. Garmin treats the numeric `conditionTypeId` as the
-source of truth; if the key and ID conflict, Garmin stores the condition that
-matches the ID.
-
-For example, this is invalid for a heart-rate end condition because ID `4` is
-`calories`, not `heart.rate`:
-
-```json
-{
-  "endCondition": {
-    "conditionTypeId": 4,
-    "conditionTypeKey": "heart.rate"
-  },
-  "endConditionValue": 145
-}
-```
-
-Use ID `6` for heart rate:
-
-```json
-{
-  "endCondition": {
-    "conditionTypeId": 6,
-    "conditionTypeKey": "heart.rate"
-  },
-  "endConditionValue": 145
-}
-```
-
-Common end-condition IDs:
-
-| ID | Key |
-|---:|---|
-| 1 | `lap.button` |
-| 2 | `time` |
-| 3 | `distance` |
-| 4 | `calories` |
-| 5 | `power` |
-| 6 | `heart.rate` |
-| 7 | `iterations` |
-| 8 | `fixed.rest` |
-| 9 | `fixed.repetition` |
-| 10 | `reps` |
-| 11 | `training.peaks.tss` |
-
-### Raw `upload_workout` target types
-
-When building raw Garmin workout JSON, `targetType.workoutTargetTypeId` and
-`targetType.workoutTargetTypeKey` must use Garmin's canonical mapping. Garmin
-treats the numeric ID as authoritative: a mismatched payload such as
-`{"workoutTargetTypeId": 6, "workoutTargetTypeKey": "heart.rate"}` is stored as
-`pace.zone`, because ID `6` means `pace.zone`.
-
-For a custom heart-rate range, use target type ID `4` with `heart.rate.zone` and
-put the bpm range in `targetValueOne` / `targetValueTwo`. These value fields
-belong on the workout step, alongside `targetType`; do not nest them inside the
-`targetType` object:
-
-```json
-{
-  "targetType": {
-    "workoutTargetTypeId": 4,
-    "workoutTargetTypeKey": "heart.rate.zone"
-  },
-  "targetValueOne": 143,
-  "targetValueTwo": 157
-}
-```
-
-The same shape applies to a custom running pace range. Pace bounds use meters
-per second:
-
-```json
-{
-  "targetType": {
-    "workoutTargetTypeId": 6,
-    "workoutTargetTypeKey": "pace.zone"
-  },
-  "targetValueOne": 1.9607843,
-  "targetValueTwo": 2.0833333
-}
-```
-
-That example represents `8:00–8:30 min/km`. The lower numeric bound is listed
-first for consistency with the heart-rate example; Garmin normalizes either
-bound order. Garmin silently discards values nested inside `targetType`, leaving
-a pace target with no active range. The upload tools repair that unambiguous
-nesting mistake, but reject the request if nested and step-level values conflict.
-
-For a named Garmin HR zone, use the same target type with `zoneNumber` instead:
-
-```json
-{
-  "targetType": {
-    "workoutTargetTypeId": 4,
-    "workoutTargetTypeKey": "heart.rate.zone"
-  },
-  "zoneNumber": 3
-}
-```
-
-Use either `zoneNumber` or `targetValueOne` / `targetValueTwo` on a target, not
-both. Garmin treats the named zone as authoritative and silently discards a
-coexisting custom range, so the upload tools reject that ambiguous shape.
-
-## One-click Install (Claude Desktop)
-
-The easiest way to add this server to Claude Desktop is via the `.dxt` Desktop Extension file — no JSON editing required.
-
-### Download and install
-
-1. Download the latest `garmin-mcp.dxt` from the [Releases page](https://github.com/Taxuspt/garmin_mcp/releases).
-2. Drag the `.dxt` file into the Claude Desktop window, **or** double-click it, **or** go to **Settings → Extensions → Install Extension** and select the file.
-3. Claude Desktop will prompt you for optional configuration (token path, email, password).
-
-### First-time authentication
-
-The extension installs and runs the server automatically, but you must authenticate with Garmin once before data can be fetched:
-
-```bash
-uvx --python 3.12 --from git+https://github.com/Taxuspt/garmin_mcp garmin-mcp-auth
-```
-
-This saves OAuth tokens to `~/.garminconnect`. After that the server works without any credentials in the config.
-
-> **Note:** Tokens are valid for approximately 6 months. Re-run `garmin-mcp-auth` when they expire.
-
-### Build the `.dxt` yourself
-
-```bash
-bash scripts/build_dxt.sh   # produces garmin-mcp.dxt in the repo root
-```
+Everything binds to `127.0.0.1`. Your health data does not leave the machine.
 
 ---
 
-## Setup
+## Contents
 
-### Quick Start for MCP Clients
-
-The easiest way to use this MCP server with Claude Desktop, [Codex](https://openai.com/codex/), or another MCP client is to authenticate once before adding the server to your configuration.
-
-#### Prerequisites
-
-- Python 3.12+
-- Garmin Connect account
-- MFA may be required if enabled on your account
-
-#### Step 1: Pre-authenticate (One-time)
-
-Before adding the server to your MCP client, authenticate once in your terminal:
-
-```bash
-
-# Install and run authentication tool
-uvx --python 3.12 --from git+https://github.com/Taxuspt/garmin_mcp garmin-mcp-auth
-
-# You'll be prompted for:
-# - Email (or set GARMIN_EMAIL env var)
-# - Password (or set GARMIN_PASSWORD env var)
-# - MFA code (if enabled on your account)
-
-# OAuth tokens will be saved to ~/.garminconnect
-```
-
-You can verify your credentials at any time with
-```bash
-uv run garmin-mcp-auth --verify
-```
-
-**Note:** You can also set credentials via environment variables:
-```bash
-GARMIN_EMAIL=your@email.com GARMIN_PASSWORD=secret garmin-mcp-auth
-```
-
-If you don't have MFA enabled you can also skip `garmin-mcp-auth` and pass `GARMIN_EMAIL` and `GARMIN_PASSWORD` as env variables directly to your MCP client, if supported. For better security, prefer the pre-authentication flow above and keep credentials out of MCP client configuration.
-
-#### Step 2: Configure Claude Desktop
-
-Add to your Claude Desktop MCP settings **WITHOUT** credentials:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "uvx",
-      "args": [
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ]
-    }
-  }
-}
-```
-
-**Important:** No `GARMIN_EMAIL` or `GARMIN_PASSWORD` needed in config! The server uses your saved tokens.
-
-#### Step 3: Restart your MCP client
-
-Your Garmin data is now available to your MCP client.
-
-For Codex and other clients, see the examples below.
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Authenticating Garmin](#authenticating-garmin)
+- [Starting Garmin MCP safely](#starting-garmin-mcp-safely)
+- [Starting Paceboard](#starting-paceboard)
+- [Connecting Strava](#connecting-strava)
+- [Environment variables](#environment-variables)
+- [Backfill and sync behaviour](#backfill-and-sync-behaviour)
+- [Data model and storage](#data-model-and-storage)
+- [Derived analytics](#derived-analytics)
+- [REST API](#rest-api)
+- [The Paceboard MCP server](#the-paceboard-mcp-server)
+- [Privacy and security](#privacy-and-security)
+- [Backups](#backups)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Extending Paceboard](#extending-paceboard)
+- [Repository layout](#repository-layout)
 
 ---
 
-### Development Setup
+## Architecture
 
-1. Install the required packages on a new environment:
+| Layer | Location | What it does |
+|---|---|---|
+| Garmin MCP server | `src/garmin_mcp/` | The existing 110-tool MCP server. Paceboard talks to it over streamable HTTP and only ever calls read tools. See [GARMIN_MCP.md](GARMIN_MCP.md). |
+| Provider adapters | `src/paceboard_api/providers/` | `GarminMcpProvider` and `StravaApiProvider` behind one `FitnessProvider` protocol. They return typed DTOs and keep the original response alongside. |
+| Ingestion | `src/paceboard_api/ingest/` | Raw payload store, normalizers, cross-provider deduplication, the sync orchestrator, and the APScheduler jobs. |
+| Storage | `src/paceboard_api/db/` | SQLAlchemy 2.x models over SQLite, with Alembic migrations. |
+| Analytics | `src/paceboard_api/analytics/` | Pure formula functions plus a service that computes and persists derived metrics with full provenance. |
+| REST API | `src/paceboard_api/api/` | FastAPI, versioned at `/api/v1`, documented at `/docs`. |
+| Dashboard | `dashboard/` | React 18 + TypeScript + Vite, TanStack Query, Recharts. Talks only to the Paceboard API. |
+| Paceboard MCP | `src/paceboard_api/mcp_server/` | Read-only MCP server over the normalized database. Optional. |
 
-```bash
-uv sync
-```
+### Two design rules worth knowing up front
 
-## Running the Server
+**Garmin is reached only through MCP.** Paceboard never imports
+`python-garminconnect`. The MCP server owns the Garmin session and its tokens;
+Paceboard sees tool responses and nothing else. This is what keeps working while
+Garmin's Developer Program is closed.
 
-### Configuration
+**A metric that cannot be computed says so.** Absent data is never rendered as
+zero, and never estimated from a proxy. Every derived metric returns either a
+value with its formula version and input sources, or an explicit reason it is
+unavailable — which the dashboard prints verbatim.
 
-Your Garmin Connect credentials are read from environment variables:
+---
 
-- `GARMIN_EMAIL`: Your Garmin Connect email address
-- `GARMIN_EMAIL_FILE`: Path to a file containing your Garmin Connect email address
-- `GARMIN_PASSWORD`: Your Garmin Connect password
-- `GARMIN_PASSWORD_FILE`: Path to a file containing your Garmin Connect password
-- `GARMIN_IS_CN`: Set to `true` to use Garmin Connect China (garmin.cn) instead of the international version (default: `false`)
-- `GARMIN_FIT_DOWNLOAD_DIR`: Default directory for downloaded activity files. When set, skips the first-run setup prompt in `download_activity_file`.
-- `GARMIN_FIT_CONFIG`: Path to the persisted download-directory config file (default: `~/.garminconnect_fit_config.json`).
+## Prerequisites
 
-File-based secrets are useful in certain environments, such as inside a Docker container. Note that you cannot set both `GARMIN_EMAIL` and `GARMIN_EMAIL_FILE`, similarly you cannot set both `GARMIN_PASSWORD` and `GARMIN_PASSWORD_FILE`.
+- **Python 3.10+** (3.12 recommended) and [`uv`](https://docs.astral.sh/uv/)
+- **Node.js 20+** and npm
+- A **Garmin Connect account**
+- Optionally, a **Strava account** (everything works without one)
 
-### Transport
+No Docker is required. The whole app is two processes plus a SQLite file.
 
-By default the server communicates over **stdio**, which is what Claude Desktop, the MCP Inspector, and most local clients expect. To serve over **HTTP** instead (e.g. when running in a container or Kubernetes), set the transport via environment variables:
+---
 
-- `GARMIN_MCP_TRANSPORT`: `stdio` (default), `streamable-http`, or `sse`
-- `GARMIN_MCP_HOST`: bind address for HTTP transports (default `127.0.0.1`; set to `0.0.0.0` only when the endpoint is fronted by an authenticating reverse proxy)
-- `GARMIN_MCP_PORT`: bind port for HTTP transports (default `8000`)
-- `GARMIN_MCP_CALL_TIMEOUT`: per-request timeout in seconds for calls to Garmin (default `90`). Garmin's API occasionally stalls a single request indefinitely; without this bound the call hangs until the MCP client's own timeout fires and reports the whole server as unresponsive. On timeout the tool returns a clear, retry-able error instead. Set to `0` to disable the bound.
-
-```bash
-GARMIN_MCP_TRANSPORT=streamable-http garmin-mcp
-```
-
-When an HTTP transport is selected:
-
-- MCP clients connect to the **`/mcp`** path (e.g. `http://localhost:8000/mcp`).
-- A plain **`GET /healthz`** endpoint is exposed for liveness/readiness probes.
-
-The server itself performs **no authentication** on the HTTP endpoint — put it behind a reverse proxy (nginx, Traefik, Authelia, etc.) if it is reachable beyond localhost.
-
-### Garmin Connect China (garmin.cn)
-
-If you use Garmin Connect China (garmin.cn) instead of the international version, set the `GARMIN_IS_CN` environment variable to `true`:
+## Installation
 
 ```bash
-# Pre-authenticate with Garmin Connect China
-GARMIN_IS_CN=true garmin-mcp-auth
-
-# Or use the CLI flag
-garmin-mcp-auth --is-cn
-```
-
-For Claude Desktop, add `GARMIN_IS_CN` to the `env` section:
-
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "uvx",
-      "args": [
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ],
-      "env": {
-        "GARMIN_IS_CN": "true"
-      }
-    }
-  }
-}
-```
-
-For Docker, add `GARMIN_IS_CN=true` to your `.env` file or uncomment it in `docker-compose.yml`.
-
-### Testing the server locally with MCP Inspector
-
-The Inspector runs directly through npx without requiring installation. Run from the project root:
-
-```bash
-npx @modelcontextprotocol/inspector uv run garmin-mcp
-```
-
-You'll be able to inspect and test the tools.
-
-### With Claude Desktop
-
-1. Create a configuration in Claude Desktop:
-
-Edit your Claude Desktop configuration file:
-
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-You have two options to run the MCP locally with Claude.
-
-#### Directly from github without cloning the repo:
-
-1. Add this server configuration:
-
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "uvx",
-      "args": [
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ],
-      "env": {
-        "GARMIN_EMAIL": "YOUR_GARMIN_EMAIL",
-        "GARMIN_PASSWORD": "YOUR_GARMIN_PASSWORD"
-      }
-    }
-  }
-}
-```
-
-You might have to add the full path to `uvx` you can check the full path with `which uvx`
-
-2. Restart Claude Desktop
-
-#### Directly from your local copy of the repository:
-
-1. Add this server configuration:
-
-```
-{
-  "mcpServers": {
-    "garmin-local": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "<full path to your local repository>/garmin_mcp",
-        "run",
-        "garmin-mcp"
-      ]
-    }
-  }
-}
-```
-
-2. Restart Claude Desktop
-
-### With Codex
-
-Codex uses TOML for MCP server configuration. Add one of the following entries to `~/.codex/config.toml` after authenticating with `garmin-mcp-auth`.
-
-You can also ask your MCP-capable client to set this up for you. For example:
-
-```text
-Install the Garmin MCP server from https://github.com/Taxuspt/garmin_mcp, authenticate with garmin-mcp-auth, and add it to my MCP configuration without storing my Garmin email or password.
-```
-
-#### Directly from GitHub without cloning the repo
-
-```toml
-[mcp_servers.garmin]
-command = "uvx"
-args = [
-  "--python",
-  "3.12",
-  "--from",
-  "git+https://github.com/Taxuspt/garmin_mcp",
-  "garmin-mcp"
-]
-```
-
-#### Directly from your local copy of the repository
-
-```toml
-[mcp_servers.garmin-local]
-command = "uv"
-args = [
-  "--directory",
-  "/full/path/to/garmin_mcp",
-  "run",
-  "garmin-mcp"
-]
-```
-
-Restart your MCP client after saving the file.
-
-### With opencode
-
-[opencode](https://opencode.ai) auto-loads a project-level `opencode.json` when launched from a repository root, so contributors who clone this repo get the Garmin MCP wired up against the local source with no extra config.
-
-#### From a clone of this repository (recommended for development)
-
-This repo ships an [`opencode.json`](./opencode.json) that runs the MCP via `uv run garmin-mcp`, so it always tracks the working tree.
-
-```bash
-git clone https://github.com/Taxuspt/garmin_mcp.git
+git clone <this-repo> garmin_mcp
 cd garmin_mcp
-uv sync                # install dependencies
-garmin-mcp-auth        # one-time Garmin login (skip if ~/.garminconnect already exists)
-opencode               # launches with the garmin MCP attached
+
+make install          # uv sync --extra paceboard, then npm install in dashboard/
+
+cp .env.example .env
+chmod 600 .env        # it will hold your Strava secret
 ```
 
-Verify the server is connected:
+---
+
+## Authenticating Garmin
+
+Once, interactively. Tokens are written to `~/.garminconnect` and reused
+afterwards; Paceboard never sees them.
 
 ```bash
-opencode mcp list
-# ●  ✓ garmin   connected
-#       uv run garmin-mcp
+uv run garmin-mcp-auth
 ```
 
-#### From any other directory (GitHub install)
+Follow the prompts, including the MFA code if your account uses one. Tokens last
+roughly a year. Re-run this command when they expire.
 
-Add the server to your global opencode config at `~/.config/opencode/opencode.json` after running `garmin-mcp-auth`:
+---
+
+## Starting Garmin MCP safely
+
+```bash
+./scripts/garmin-mcp-readonly.sh
+```
+
+This starts the MCP server on `http://127.0.0.1:8000/mcp` with an allowlist of
+**82 read-only tools** — every tool Paceboard maps, and nothing else. Tools that
+create, upload, edit, schedule, set, log, import or delete anything are not
+registered at all, so they cannot be invoked even by a bug.
+
+The allowlist is generated from the tool catalog, and the generator refuses to
+emit a tool matching a mutating name pattern:
+
+```bash
+make allowlist        # regenerates scripts/garmin-mcp-readonly.sh
+```
+
+Verify it is up:
+
+```bash
+curl http://127.0.0.1:8000/healthz     # -> ok
+make smoke                             # lists mapped/unmapped tools, makes one read call
+```
+
+> The MCP transport performs no authentication. The script binds to loopback and
+> you should keep it there — anything that can reach the port can read your
+> entire Garmin history.
+
+---
+
+## Starting Paceboard
+
+In a second terminal:
+
+```bash
+make dev              # or: ./scripts/dev.sh
+```
+
+That applies migrations, starts the API and the dashboard, and prints:
+
+```
+  Paceboard is running (loopback only)
+
+    Dashboard   http://127.0.0.1:3000
+    REST API    http://127.0.0.1:8787/api/v1
+    API docs    http://127.0.0.1:8787/docs
+    Garmin MCP  http://127.0.0.1:8000/mcp
+```
+
+**Open http://127.0.0.1:3000.** Then either press **Sync now** in the header, or
+run the initial backfill from the shell:
+
+```bash
+make backfill                                     # the configured window, 90 days
+uv run --extra paceboard paceboard-api sync --mode backfill --days 365
+```
+
+A 90-day Garmin backfill takes a few minutes: it walks roughly 15 tools per day
+plus per-activity detail and FIT streams, with bounded concurrency so Garmin does
+not rate-limit you.
+
+### Individual processes
+
+```bash
+make api        # API only
+make web        # dashboard only
+make migrate    # migrations only
+make sync       # one incremental sync, then exit
+```
+
+---
+
+## Connecting Strava
+
+Paceboard is fully functional on Garmin data alone. Until Strava credentials
+exist, the Connections page shows **"Strava not connected"** and every Strava
+route returns a typed, explicit not-configured response.
+
+To connect:
+
+1. Go to <https://www.strava.com/settings/api> and create an application. Fill
+   the form in like this:
+
+   | Field | Value | Why |
+   |---|---|---|
+   | Application Name | `Paceboard` | Free text; shown on the consent screen. |
+   | Category | `Training` | Free choice, no effect. |
+   | Website | `http://127.0.0.1:3000` | Required but cosmetic — Strava never fetches it and it plays no part in OAuth. Any real URL works if the validator objects. |
+   | Authorization Callback Domain | `127.0.0.1` | **The one that matters.** |
+
+2. **Authorization Callback Domain must be exactly `127.0.0.1`** — domain only,
+   no `http://`, no port, no path. Strava matches it against the *host* of the
+   redirect URI, and since a port is not part of the domain, `127.0.0.1` covers
+   Paceboard's `http://127.0.0.1:8787/api/v1/auth/strava/callback`.
+
+   Use `127.0.0.1`, not `localhost`: Strava treats them as different hosts, and
+   `STRAVA_REDIRECT_URI` defaults to `127.0.0.1`. If you prefer `localhost`,
+   change both to match. This is the field people get wrong most often.
+
+3. Copy the Client ID and Client Secret into `.env`:
+
+   ```dotenv
+   STRAVA_CLIENT_ID=123456
+   STRAVA_CLIENT_SECRET=your-secret-here
+   STRAVA_REDIRECT_URI=http://127.0.0.1:8787/api/v1/auth/strava/callback
+   ```
+
+4. Restart the Paceboard API.
+5. Open **Connections → Strava → Connect Strava** and approve the request.
+
+Paceboard requests read-only scopes (`read,activity:read_all,profile:read_all`)
+and never writes to Strava. Tokens are encrypted at rest and refreshed
+automatically; **Disconnect and revoke** deauthorizes at Strava and deletes the
+local file.
+
+### Webhooks
+
+The webhook endpoints are implemented (`GET`/`POST /api/v1/auth/strava/webhook`)
+but a loopback-bound Paceboard is not reachable from Strava's servers, so local
+installs fall back to polling every `STRAVA_POLL_MINUTES`. If you expose the API
+through a tunnel, set `STRAVA_WEBHOOK_VERIFY_TOKEN` and register the
+subscription; no code changes are needed.
+
+---
+
+## Environment variables
+
+Everything lives in `.env`; see [`.env.example`](.env.example) for the annotated
+full list. The ones you are most likely to change:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GARMIN_MCP_URL` | `http://127.0.0.1:8000/mcp` | Where the Garmin MCP server listens |
+| `PACEBOARD_HOST` | `127.0.0.1` | API bind address; non-loopback is refused unless you opt in |
+| `PACEBOARD_API_PORT` | `8787` | REST API port |
+| `PACEBOARD_WEB_PORT` | `3000` | Dashboard port |
+| `PACEBOARD_TIMEZONE` | `Europe/Oslo` | Display timezone; storage is always UTC |
+| `PACEBOARD_DATABASE_PATH` | `./data/paceboard.sqlite3` | Database location |
+| `PACEBOARD_BACKFILL_DAYS` | `90` | Initial backfill window |
+| `PACEBOARD_FAST_INTERVAL_MINUTES` | `15` | Cadence for today's health and recent activities |
+| `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | empty | Strava application credentials |
+
+---
+
+## Backfill and sync behaviour
+
+Three modes, all idempotent — running the same window twice produces the same
+database:
+
+| Mode | Window | Typical trigger |
+|---|---|---|
+| `today` | today only | the 15-minute job |
+| `incremental` | last `PACEBOARD_RECONCILE_DAYS` days | Sync now, the daily job |
+| `backfill` | last `PACEBOARD_BACKFILL_DAYS` days | first run, or after adding a provider |
+
+The scheduler runs three jobs:
+
+| Job | Cadence | What it calls |
+|---|---|---|
+| fast | every 15 min | today's health snapshot + recent activities, plus detail/streams for anything new |
+| daily | 04:15 local | reconciles the last 3 days, refreshes trends, account metadata and gear |
+| derived | every 6 h | recomputes CTL/ATL/TSB, weekly volume, monotony and strain |
+
+Only the `fast`-cadence tools run every quarter-hour. Calling all 50-odd mapped
+tools that often would exhaust your rate budget for no benefit.
+
+**Enrichment is resumable.** Activity detail and FIT streams are fetched in
+batches (25 details, 10 stream sets per run) against a per-record watermark, so a
+large backfill drains over consecutive runs instead of hammering Garmin once.
+
+**Partial success is a first-class outcome.** One tool erroring does not abort
+the run; the run finishes as `partial` and the failure is recorded against that
+capability. Absences (`no data`, `unsupported`) are recorded but are *not* errors.
+
+A long backfill can be cancelled from **Connections → Cancel run**, or
+`POST /api/v1/sync/{id}/cancel`.
+
+---
+
+## Data model and storage
+
+SQLite at `./data/paceboard.sqlite3` (WAL mode, `0600` permissions), 28 tables.
+Expect roughly 20–40 MB per year of training; **Connections → Storage** shows the
+live figure and per-table row counts.
+
+- **Provider plumbing** — `provider_connections`, `provider_capabilities`,
+  `sync_runs`, `sync_errors`, `sync_watermarks`, `raw_payloads`
+- **Identity** — `athletes`, `devices`, `gear`, `heart_rate_zones`
+- **Activities** — `activities` (canonical), `activity_source_records` (one per
+  provider), `activity_laps`, `activity_splits`, `activity_zones`,
+  `activity_streams`, `duplicate_candidates`
+- **Daily health** — `daily_health`, `sleep_records`, `hrv_records`,
+  `stress_records`, `body_battery_records`, `body_composition`
+- **Training** — `training_status`, `training_load`, `performance_metrics`,
+  `derived_metrics`
+- **Preferences** — `app_settings`
+
+Conventions that hold everywhere:
+
+- Provider IDs are **strings** (Garmin activity ids exceed 2^53).
+- Timestamps are **UTC**; the provider's local string and UTC offset are kept
+  alongside.
+- Every row carries its **source**.
+- Raw payloads are kept verbatim with their endpoint, parameters, retrieval time
+  and schema version — including the ones that returned nothing, which is what
+  makes the Data Explorer's coverage view honest. The one exception is FIT
+  per-sample record pages: their provenance row is stored but the body is not,
+  because those samples are already kept compressed in `activity_streams` and
+  duplicating them as JSON would add hundreds of megabytes a year. The row says
+  so explicitly rather than appearing empty.
+- Streams are stored one row per channel, zlib-compressed.
+
+### Cross-provider deduplication
+
+A Garmin-recorded ride usually appears in Strava minutes later. Paceboard keeps
+**both** raw records forever and decides whether they describe the same session:
+
+- an explicit provider link (Strava's `external_id` naming the Garmin activity,
+  or a shared `upload_id`) is decisive;
+- otherwise sport family must be compatible and starts must fall within
+  `PACEBOARD_DEDUPE_START_TOLERANCE_SECONDS`, after which duration and distance
+  agreement are scored continuously rather than pass/fail;
+- score ≥ 0.85 merges automatically, ≥ 0.55 goes to the **review strip** at the
+  top of the Activities page, below that stays separate.
+
+When merged, each canonical field is chosen by an explicit preference order —
+Garmin for device-native measurements and physiology, Strava for its own title
+and social metadata — and the winner is recorded in `field_provenance`, which the
+activity detail page will show you on request.
+
+---
+
+## Derived analytics
+
+All formulas live in `src/paceboard_api/analytics/formulas.py`, are pure, are
+individually unit-tested, and return `None` rather than a guess:
+
+| Metric | Formula | Needs |
+|---|---|---|
+| CTL / ATL | exponentially weighted 42-day / 7-day average of daily TRIMP | activities with HR |
+| TSB (form) | CTL − ATL | the above |
+| TRIMP | Banister: `min × HRr × 0.64 × e^(k·HRr)` | avg HR, resting HR, max HR |
+| Monotony / strain | Foster: `mean/SD` over 7 days, `weekly load × monotony` | ≥ 3 training days |
+| Normalized power | Coggan: 30 s rolling average, 4th power, 4th root | ≥ 30 s of power |
+| Intensity factor / TSS | `NP/FTP`, `(s·NP·IF)/(FTP·3600)·100` | power + a recorded FTP |
+| Aerobic decoupling | `(EF₁ − EF₂)/EF₁ × 100` over session halves | ≥ 20 paired HR samples |
+| Grade-adjusted pace | Minetti metabolic cost polynomial, valid to ±45 % | speed + grade |
+| Power/pace curves | best sustained average per duration | streams |
+| Best efforts | fastest time over each target distance | distance + time streams |
+| HRV baseline | 7-night trailing mean, plus % deviation | 7 nights of HRV |
+| Resting-HR baseline | 28-day trailing mean | 28 days |
+| Sleep debt | shortfall vs 8 h over 7 nights, floored at zero | sleep records |
+| Sleep consistency | bedtime SD mapped to 0–100, zero at 120 min SD | ≥ 3 bedtimes |
+| Correlations | Pearson *r* with sample size | ≥ 5 paired days |
+
+Persisted derived metrics record their **formula version**, **input sources**,
+**units** and **calculation time**. Bump `FORMULA_VERSION` when a formula
+changes, so old values stay identifiable rather than being silently rewritten.
+
+Garmin's own acute/chronic load is ingested and displayed **alongside**
+Paceboard's TRIMP-based series, never blended into it — the two use different
+units and averaging them would be meaningless.
+
+---
+
+## REST API
+
+OpenAPI at <http://127.0.0.1:8787/docs>. Every route is under `/api/v1`.
+
+```bash
+# Status, connections, capabilities
+curl -s localhost:8787/api/v1/status | jq '.counts'
+curl -s localhost:8787/api/v1/connections | jq '.[].status'
+curl -s 'localhost:8787/api/v1/capabilities?status=unavailable' | jq '.[].name'
+
+# Sync
+curl -s -X POST localhost:8787/api/v1/sync \
+  -H 'Content-Type: application/json' \
+  -d '{"providers":["garmin"],"mode":"backfill"}'
+curl -s localhost:8787/api/v1/sync/latest | jq '{status, records_written, errors}'
+
+# Activities
+curl -s 'localhost:8787/api/v1/activities?sport=run&limit=10' | jq '.page'
+curl -s localhost:8787/api/v1/activities/1 | jq '{name, sport, distance_m, field_provenance}'
+curl -s 'localhost:8787/api/v1/activities/1/streams?channels=heartrate,velocity_smooth&max_points=500' | jq '.point_count'
+curl -s localhost:8787/api/v1/activities/1/analysis | jq '.metrics.aerobic_decoupling'
+
+# Health and training
+curl -s 'localhost:8787/api/v1/health/daily?days=30' | jq 'length'
+curl -s localhost:8787/api/v1/health/recovery/summary | jq '.hrv_deviation'
+curl -s 'localhost:8787/api/v1/training/load?days=90' | jq '{ctl: .ctl[-1], tsb: .tsb[-1]}'
+curl -s 'localhost:8787/api/v1/training/zones?days=90' | jq '.distribution'
+
+# Raw provider data and exports
+curl -s 'localhost:8787/api/v1/raw-data?status=no_data&limit=5' | jq '.items[].endpoint'
+curl -s 'localhost:8787/api/v1/export.csv?dataset=daily_health&days=90' -o daily_health.csv
+```
+
+Errors are always the same shape:
 
 ```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "garmin": {
-      "type": "local",
-      "command": [
-        "uvx",
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ],
-      "enabled": true,
-      "timeout": 30000
-    }
-  }
-}
+{"error": {"code": "not_found", "message": "Activity 9999 was not found", "detail": null}}
 ```
 
-Restart opencode after saving the file. The first `uvx` invocation downloads and caches the package, so the initial startup may take a few seconds.
+Codes: `bad_request`, `validation_error`, `not_found`, `conflict`,
+`payload_too_large`, `provider_unavailable`, `internal_error`.
 
-### With Docker
+---
 
-Docker provides an isolated and consistent environment for running the MCP server.
+## The Paceboard MCP server
 
-#### Quick Start with Docker Compose (Recommended)
-
-1. Create a `.env` file with your credentials:
+Optional, read-only, and backed by the **normalized database** — it never
+contacts Garmin or Strava. If a number is missing there, run a sync; do not call
+this server harder.
 
 ```bash
-echo "GARMIN_EMAIL=your_email@example.com" > .env
-echo "GARMIN_PASSWORD=your_password" >> .env
+uv run --extra paceboard paceboard-mcp                 # stdio
+PACEBOARD_MCP_TRANSPORT=streamable-http \
+  uv run --extra paceboard paceboard-mcp               # http://127.0.0.1:8788/mcp
 ```
 
-2. Start the container:
+Tools: `query_activities`, `get_activity_analysis`, `get_recovery_summary`,
+`get_training_load`, `compare_periods`, `find_correlations`,
+`get_data_freshness`.
 
-```bash
-docker compose up -d
-```
+For Claude Desktop (`claude_desktop_config.json`):
 
-3. View logs to monitor the server:
-
-```bash
-docker compose logs -f garmin-mcp
-```
-
-#### Using Docker Directly
-
-```bash
-# Build the image
-docker build -t garmin-mcp .
-
-# Run the container
-docker run -it \
-  -e GARMIN_EMAIL="your_email@example.com" \
-  -e GARMIN_PASSWORD="your_password" \
-  -v garmin-tokens:/root/.garminconnect \
-  garmin-mcp
-```
-
-#### Using File-Based Secrets (More Secure)
-
-For enhanced security, especially in production environments, use file-based secrets instead of environment variables:
-
-1. Create a secrets directory and add your credentials:
-
-```bash
-mkdir -p secrets
-echo "your_email@example.com" > secrets/garmin_email.txt
-echo "your_password" > secrets/garmin_password.txt
-chmod 600 secrets/*.txt
-```
-
-2. Edit [docker-compose.yml](docker-compose.yml) and uncomment the secrets section:
-
-```yaml
-services:
-  garmin-mcp:
-    environment:
-      - GARMIN_EMAIL_FILE=/run/secrets/garmin_email
-      - GARMIN_PASSWORD_FILE=/run/secrets/garmin_password
-    secrets:
-      - garmin_email
-      - garmin_password
-
-secrets:
-  garmin_email:
-    file: ./secrets/garmin_email.txt
-  garmin_password:
-    file: ./secrets/garmin_password.txt
-```
-
-3. Start the container:
-
-```bash
-docker compose up -d
-```
-
-#### Handling MFA with Docker
-
-If you have multi-factor authentication (MFA) enabled on your Garmin account:
-
-1. Run the container in interactive mode:
-
-```bash
-docker compose run --rm garmin-mcp
-```
-
-2. When prompted, enter your MFA code:
-
-```
-Garmin Connect MFA required. Please check your email/phone for the code.
-Enter MFA code: 123456
-```
-
-3. The OAuth tokens will be saved to the Docker volume (`garmin-tokens`), so you won't need to re-authenticate on subsequent runs.
-
-4. After MFA setup, you can run the container normally:
-
-```bash
-docker compose up -d
-```
-
-#### Docker Volume Management
-
-The OAuth tokens are stored in a persistent Docker volume to avoid re-authentication:
-
-```bash
-# List volumes
-docker volume ls
-
-# Inspect the tokens volume
-docker volume inspect garmin_mcp_garmin-tokens
-
-# Remove the volume (will require re-authentication)
-docker volume rm garmin_mcp_garmin-tokens
-```
-
-#### Using with Claude Desktop via Docker
-
-To use the Dockerized MCP server with Claude Desktop, you can configure it to communicate with the container. However, note that MCP servers typically communicate via stdio, which works best with direct process execution. For Docker-based deployments, consider using the standard `uvx` method shown in the [With Claude Desktop](#with-claude-desktop) section instead.
-
-
-## Usage Examples
-
-Once connected in Claude, you can ask questions like:
-
-- "Show me my recent activities"
-- "What was my sleep like last night?"
-- "How many steps did I take yesterday?"
-- "Show me the details of my latest run"
-- "Analyze my last ride's power zones and compare to my training zones"
-- "Show me my CTL, ATL, and TSB trend for the last 6 weeks"
-- "What was my power duration curve from yesterday's ride? Estimate my FTP."
-- "Analyze the FIT data from my last cycling activity — how was my shifting quality on the climbs?"
-- "Show me my HRV trend for the last 2 weeks and flag any recovery concerns"
-- "What's my season best 20-minute power and when did I set it?"
-
-## Troubleshooting
-
-### "Failed to spawn process: No such file or directory"
-
-If Claude Desktop can't find `uvx`, it's because `uvx` is not in the PATH that Claude Desktop uses. To fix this:
-
-1. Find where `uvx` is installed:
-```bash
-which uvx
-```
-
-2. Use the full path in your configuration. For example, if `uvx` is at `/Users/username/.cargo/bin/uvx`:
 ```json
 {
   "mcpServers": {
-    "garmin": {
-      "command": "/Users/username/.cargo/bin/uvx",
-      "args": [
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ]
+    "paceboard": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/garmin_mcp", "run",
+               "--extra", "paceboard", "paceboard-mcp"],
+      "env": { "PACEBOARD_DATABASE_PATH": "/absolute/path/to/garmin_mcp/data/paceboard.sqlite3" }
     }
   }
 }
 ```
 
-### Login Issues
+> If you previously configured a `paceboard` MCP entry pointing at
+> `PACEBOARD_URL=http://localhost:3000`, that was the old Claude-mediated
+> ingestion bridge. It has been retired (kept for reference under
+> `legacy/paceboard_mcp_bridge/`); replace the entry with the block above.
 
-If you encounter login issues:
+---
 
-1. Verify your credentials are correct
-2. Check if Garmin Connect requires additional verification
-3. Ensure the garminconnect package is up to date
+## Privacy and security
 
-### Logs
+- **Loopback by default.** Binding elsewhere is refused unless you set
+  `PACEBOARD_ALLOW_NON_LOOPBACK=true`, and even then the API has no
+  authentication — put a reverse proxy with auth in front of it first.
+- **Credentials never reach the browser.** Garmin tokens stay with the MCP
+  server; Strava tokens stay in the backend. No API route returns token material.
+- **Encrypted Strava tokens.** Sealed with Fernet using a key at
+  `data/paceboard.key`, mode `0600`. Honest limitation: the key sits beside the
+  token file, so this protects against a leaked backup or a synced folder, not
+  against an attacker who already has your user account.
+- **Redacting logs.** Structured logs record tool name, argument *keys*,
+  duration and status. Response bodies are never logged, and a filter scrubs
+  anything token-shaped even if a dependency logs it.
+- **Maps are off by default.** A GPS trace is the most identifying data here, so
+  routes are hidden until you turn them on, and even then Paceboard draws them
+  locally as an SVG polyline with **no network request**. Fetching map tiles is a
+  separate opt-in, because it would send your coordinates to a tile server.
+- **No mutating Garmin tools.** Enforced in three places: the launch script's
+  allowlist, the MCP client, and the API's tool-invocation route.
+- **Request limits and validation.** Bodies are capped at 2 MB; date ranges,
+  pagination, tool names and tool arguments are all validated.
+- **Your data is deletable and exportable.** Scoped CSV/JSON exports per dataset,
+  and **Connections → Delete stored data** (raw / derived / everything), gated on
+  typing the scope back.
+- **No third-party analytics or error reporting.** Nothing is sent anywhere.
+- `.env`, `data/`, `.e2e/` and token files are git-ignored.
 
-For other issues, check the Claude Desktop logs at:
+---
 
-- macOS: `~/Library/Logs/Claude/mcp-server-garmin.log`
-- Windows: `%APPDATA%\Claude\logs\mcp-server-garmin.log`
+## Backups
 
-### Garmin Connect Multi-Factor Authentication (MFA)
-
-#### Understanding MFA with MCP Servers
-
-MCP servers run as background processes without direct terminal access. If your Garmin account has MFA enabled, you must authenticate once using the pre-authentication tool before the server can run.
-
-#### Recommended: Pre-Authentication Tool
-
-The easiest way to handle MFA is using the dedicated authentication tool:
-
-```bash
-garmin-mcp-auth
-```
-
-This saves OAuth tokens to `~/.garminconnect` for future use. The server will automatically use these tokens when running in Claude Desktop or other MCP clients.
-
-**Additional Options:**
-
-```bash
-# Use environment variables for credentials
-GARMIN_EMAIL=you@example.com GARMIN_PASSWORD=secret garmin-mcp-auth
-
-# Verify existing tokens
-garmin-mcp-auth --verify
-
-# Force re-authentication (e.g., when tokens expire)
-garmin-mcp-auth --force-reauth
-
-# Use custom token location
-garmin-mcp-auth --token-path ~/.garmin_tokens
-```
-
-#### Alternative: Manual First Run
-
-You can also authenticate by running the server once interactively:
+The database is a single file. Back it up with SQLite's own backup command so
+you get a consistent copy even while the app is running:
 
 ```bash
-# Store credentials in files for security
-echo "your_email@example.com" > ~/.garmin_email
-echo "your_password" > ~/.garmin_password
-chmod 600 ~/.garmin_email ~/.garmin_password
-
-# Run server interactively to authenticate
-GARMIN_EMAIL_FILE=~/.garmin_email GARMIN_PASSWORD_FILE=~/.garmin_password \
-  uvx --python 3.12 --from git+https://github.com/Taxuspt/garmin_mcp garmin-mcp
-
-# Enter MFA code when prompted
-# Tokens will be saved automatically
-# Now add to Claude Desktop config without credentials
+sqlite3 data/paceboard.sqlite3 ".backup 'backups/paceboard-$(date +%F).sqlite3'"
 ```
 
-After initial authentication, configure Claude Desktop **without** credentials (tokens are already saved):
+Restore by stopping Paceboard and copying the file back. `data/paceboard.key` is
+needed to decrypt Strava tokens — back it up separately from the database, or
+simply reconnect Strava after a restore.
 
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "uvx",
-      "args": [
-        "--python",
-        "3.12",
-        "--from",
-        "git+https://github.com/Taxuspt/garmin_mcp",
-        "garmin-mcp"
-      ]
-    }
-  }
-}
-```
-
-#### Using Docker with MFA
-
-If using Docker, follow the [Handling MFA with Docker](#handling-mfa-with-docker) section above for a streamlined experience with persistent token storage.
-
-#### Troubleshooting MFA
-
-**Error: "MFA authentication required but no interactive terminal available"**
-
-Solution:
-1. Open terminal
-2. Run: `garmin-mcp-auth`
-3. Enter credentials and MFA code
-4. Restart Claude Desktop
-
-**Token Expired**
-
-OAuth tokens expire periodically (approximately every 6 months). Re-authenticate:
-```bash
-garmin-mcp-auth --force-reauth
-```
-
-**Verify Tokens Work**
-```bash
-garmin-mcp-auth --verify
-```
+---
 
 ## Testing
 
-This project includes comprehensive tests for all MCP tools. **All tests are currently passing (100%)**.
-
-### Running Tests
-
 ```bash
-# Run all integration tests (default - uses mocked Garmin API)
-uv run pytest tests/integration/
+make test           # backend tests + frontend typecheck and lint
+make check          # the above plus a production dashboard build
+make e2e            # Playwright, in fixture mode
 
-# Run tests with verbose output
-uv run pytest tests/integration/ -v
-
-# Run a specific test module
-uv run pytest tests/integration/test_health_wellness_tools.py -v
-
-# Run end-to-end tests (requires real Garmin credentials)
-uv run pytest tests/e2e/ -m e2e -v
+uv run --extra paceboard pytest -q -m "not e2e"     # backend only
+uv run --extra paceboard pytest tests/paceboard -q  # Paceboard only
+cd dashboard && npm run typecheck && npm run lint && npm run build
 ```
 
-### Test Structure
+The Playwright suite runs against **fixture mode**: a scratch database under
+`.e2e/` seeded with clearly labelled synthetic data and a deliberately
+unreachable Garmin MCP, so it needs no account and touches no real data.
 
-- **Integration tests** (200+ tests): Test all MCP tools using FastMCP integration with mocked Garmin API responses
-- **End-to-end tests** (4 tests): Test with real MCP server and Garmin API (requires valid credentials)
-
-## Reinstalling from local path
-
-If you are working from a local checkout or fork:
+To browse the UI with fixture data yourself:
 
 ```bash
-uv tool install --python 3.12 --force C:\Users\aresd\Desktop\programacion\garmin_mcp
+PACEBOARD_DATABASE_PATH=./data/fixtures.sqlite3 \
+  uv run --extra paceboard paceboard-api seed-fixtures --days 90
+PACEBOARD_DATABASE_PATH=./data/fixtures.sqlite3 PACEBOARD_FIXTURE_MODE=true make dev
 ```
+
+Every fixture row is stored with `source="fixture"` and the dashboard shows a
+persistent banner. `seed-fixtures` refuses to run against a database that already
+contains real activity records.
+
+---
+
+## Troubleshooting
+
+**`Cannot reach Garmin MCP` / the Connections page shows Garmin disconnected**
+Check `curl http://127.0.0.1:8000/healthz`. If it fails, start
+`./scripts/garmin-mcp-readonly.sh`. If `GARMIN_MCP_URL` points at another port,
+make sure `.env` and the server agree.
+
+**`Garmin authentication expired`**
+Your Garmin tokens lapsed. Run `uv run garmin-mcp-auth` and restart the MCP
+server. Paceboard picks up automatically on the next sync.
+
+**Garmin rate limits (429)**
+The client backs off exponentially with jitter, starting at 20 s for rate limits.
+If you keep hitting them, lower `GARMIN_MCP_CONCURRENCY` to 1–2 and backfill in
+shorter windows (`--days 30`) rather than a year at once.
+
+**A tool shows as `unavailable` in the Data Explorer**
+The MCP server did not register it. Either it is filtered by
+`GARMIN_ENABLED_TOOLS`, or the installed server version predates it. Paceboard
+records the capability as unavailable and carries on; nothing else breaks.
+
+**A tool shows `unsupported` / "Your device does not support this metric"**
+Your watch does not record it. Running tolerance, endurance score and hill score
+are the usual ones. This is an absence, not an error, and is recorded as such.
+
+**`Date range too large (61 days). Maximum is 30 days.`**
+Handled automatically — those tools declare `max_range_days` in the catalog and
+the provider splits the window. If you see it from a manual Data Explorer call,
+shorten the range.
+
+**Strava rate limits**
+Strava allows 100 reads / 15 min and 1000 / day. Paceboard tracks the
+`X-RateLimit-*` headers (visible on the Connections page) and backs off from 60 s
+on a 429. A large backfill may need to resume in the next window; it is
+resumable, so just run it again.
+
+**Strava callback fails**
+The **Authorization Callback Domain** must be exactly `127.0.0.1` — not
+`localhost`, not a URL. `STRAVA_REDIRECT_URI` must match `PACEBOARD_API_PORT`.
+
+**Sync says `partial`**
+One or more capabilities failed while the rest succeeded. Open
+**Connections → Sync → Issues in this run** for the specific tool and message.
+
+**Port already in use**
+Change `PACEBOARD_API_PORT` / `PACEBOARD_WEB_PORT` in `.env`, or stop the other
+process. The dashboard's dev server uses `strictPort`, so it fails loudly rather
+than silently moving.
+
+**The dashboard is empty after a sync**
+Check `GET /api/v1/status` → `counts`. If they are zero, look at
+`GET /api/v1/sync/latest` → `errors`.
+
+---
+
+## Extending Paceboard
+
+### Adding a Garmin MCP tool
+
+1. Add a `ToolSpec` to `src/paceboard_api/providers/garmin/catalog.py`, giving it
+   a category, scope (`daily` / `range` / `activity` / `account`), cadence,
+   expected argument names, and a `handler` name. Set `max_range_days` if the
+   tool caps its window. The catalog rejects mutating names at import time.
+2. Write the handler in `src/paceboard_api/ingest/normalize_garmin.py`, decorated
+   with `@handler("your_handler_name")`. Return the number of rows written, and
+   leave absent provider fields as `None`.
+3. Add a migration if you needed new columns:
+   `uv run --extra paceboard alembic revision --autogenerate -m "add x"`.
+4. Regenerate the launch allowlist: `make allowlist`.
+5. Add a fixture and a test in `tests/paceboard/`. `test_normalization.py`
+   asserts every scheduled tool has a registered handler.
+
+### Adding a provider
+
+1. Implement the `FitnessProvider` protocol from
+   `src/paceboard_api/providers/base.py`. Return DTOs plus the untouched
+   `ProviderResult`s.
+2. Add a normalizer module exposing `get_handler(name)`.
+3. Register the adapter in `src/paceboard_api/providers/registry.py` and add its
+   name to `PROVIDER_NAMES`.
+4. Add its sport mapping and, if it can record the same session as an existing
+   provider, its field preference order in `src/paceboard_api/ingest/activities.py`.
+
+Nothing in the API, analytics or dashboard needs to change.
+
+---
+
+## Repository layout
+
+```
+src/garmin_mcp/          The Garmin MCP server (unchanged; see GARMIN_MCP.md)
+src/paceboard_api/       The Paceboard backend
+  config.py              Settings from the environment
+  db/                    SQLAlchemy models and session handling
+  migrations/            Alembic
+  providers/             Provider adapters (garmin/, strava/) and the registry
+  ingest/                Raw store, normalizers, dedupe, sync, scheduler
+  analytics/             Formulas and the analytics service
+  api/                   FastAPI routers and schemas
+  mcp_server/            Read-only MCP over the normalized database
+  fixtures_mode.py       Labelled synthetic data for development and e2e
+dashboard/               React + TypeScript dashboard
+  src/pages/             Overview, Activities, Activity detail, Recovery,
+                         Training, Data Explorer, Connections
+  e2e/                   Playwright
+scripts/                 garmin-mcp-readonly.sh, dev.sh, e2e-server.sh
+tests/paceboard/         Paceboard test suite and fixtures
+tests/unit|integration/  The existing Garmin MCP tests
+legacy/                  Retired implementations, kept for reference
+data/                    Your database and tokens (git-ignored)
+```
+
+### About `legacy/`
+
+Two earlier implementations were retired rather than deleted:
+
+- `legacy/paceboard-sites-dashboard/` — the previous hosted Cloudflare/Sites
+  dashboard. **It contains its own nested `.git` repository, left untouched**, so
+  its history survives in place. It is git-ignored by the outer repository rather
+  than embedded as a submodule or gitlink, so the two histories stay independent
+  and neither can clobber the other. Nothing in the running app depends on it.
+- `legacy/paceboard_mcp_bridge/` — the MCP bridge that had Claude carry data into
+  the dashboard. Paceboard now ingests directly, so this is no longer used.
+
+---
+
+## Credits and licence
+
+Paceboard is MIT licensed. It is built on top of
+[**Taxuspt/garmin_mcp**](https://github.com/Taxuspt/garmin_mcp) by Alexandre
+Domingues and its contributors — also MIT — which provides the Garmin Connect MCP
+server in `src/garmin_mcp/` that Paceboard reads all Garmin data through. That
+work is unmodified here; Paceboard treats it as the provider boundary and adds
+the ingestion pipeline, database, analytics, REST API and dashboard around it.
+
+If you find a bug in Garmin tool coverage or in a Garmin response shape, it very
+likely belongs upstream — please report it at
+<https://github.com/Taxuspt/garmin_mcp/issues> so everyone benefits.
+
+Both copyright notices are in [LICENSE](LICENSE).
+
+## Using this yourself
+
+Paceboard reads *your* Garmin account, so there is nothing to sign up for and no
+server to share. Anyone who wants to run it does the same thing you did:
+
+```bash
+git clone <your-repo-url> paceboard
+cd paceboard
+make install
+cp .env.example .env
+uv run garmin-mcp-auth          # their own Garmin login
+./scripts/garmin-mcp-readonly.sh
+make dev                        # second terminal
+```
+
+Their data lives in their own `data/paceboard.sqlite3` and never leaves their
+machine. Nothing in this repository is shared between installations.

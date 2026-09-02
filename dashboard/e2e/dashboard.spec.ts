@@ -1,0 +1,167 @@
+/**
+ * End-to-end flow against fixture mode.
+ *
+ * The suite runs on a scratch database seeded with clearly labelled synthetic
+ * data and a deliberately unreachable Garmin MCP, so it exercises both the
+ * populated views and the disconnected-provider states without touching a real
+ * account.
+ */
+import { expect, test, type Page } from "@playwright/test";
+
+test.describe("Paceboard dashboard", () => {
+  test.beforeEach(async ({ page }) => {
+    page.on("pageerror", (error) => {
+      throw new Error(`Uncaught page error: ${error.message}`);
+    });
+  });
+
+  /** Navigate via the rail, so in-page links of the same name never match. */
+  const goto = (page: Page, name: string) =>
+    page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name, exact: true }).click();
+
+  test("the full navigation flow renders real stored data on every page", async ({ page }) => {
+    await page.goto("/");
+
+    // Fixture mode must announce itself; synthetic data may never masquerade
+    // as measured data.
+    await expect(page.getByTestId("fixture-banner")).toContainText("Fixture mode");
+
+    // --- Overview
+    await expect(page.getByRole("heading", { name: "Today against your own baseline" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Training load and form" })).toBeVisible();
+
+    const readouts = page.locator(".readout-value");
+    await expect(readouts.first()).toBeVisible();
+    expect(await readouts.count()).toBeGreaterThan(3);
+
+    // The form panel must show computed numbers, not placeholders.
+    const ctl = page.locator(".panel-head .mono").first();
+    await expect(ctl).toHaveText(/\d/);
+
+    await expect(page.getByRole("heading", { name: "Recent activities" })).toBeVisible();
+    const recentRows = page.locator("table tbody tr");
+    expect(await recentRows.count()).toBeGreaterThan(0);
+
+    // --- Activities
+    await goto(page, "Activities");
+    await expect(page.getByRole("heading", { name: "Activities", level: 1 })).toBeVisible();
+
+    const rows = page.locator("table tbody tr");
+    await expect(rows.first()).toBeVisible();
+    const totalRows = await rows.count();
+    expect(totalRows).toBeGreaterThan(5);
+
+    // Filtering narrows the set and is reflected in the table.
+    await page.getByLabel("Sport").selectOption("run");
+    await expect(page.locator("table tbody tr td:nth-child(2)").first()).toHaveText("Run");
+    const runRows = await page.locator("table tbody tr").count();
+    expect(runRows).toBeLessThanOrEqual(totalRows);
+
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await expect(page.locator("table tbody tr")).toHaveCount(totalRows);
+
+    // --- Activity detail
+    await page.locator("table tbody tr td a").first().click();
+    await expect(page.locator("h1")).toContainText(/Fixture/);
+    await expect(page.getByRole("heading", { name: "Session charts" })).toBeVisible();
+    await expect(page.locator(".recharts-surface").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Laps" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Time in heart-rate zones" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Derived analysis" })).toBeVisible();
+
+    // A metric with no source data says so rather than showing a number.
+    await expect(page.locator(".na-inline").first()).toContainText("Unavailable");
+
+    // --- Recovery
+    await goto(page, "Recovery");
+    await expect(page.getByRole("heading", { name: "Recovery", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sleep stages" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "HRV and baseline" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recovery against load" })).toBeVisible();
+    expect(await page.locator(".recharts-surface").count()).toBeGreaterThan(3);
+
+    await page.getByRole("button", { name: "30 days" }).click();
+    await expect(page.getByRole("button", { name: "30 days" })).toHaveAttribute("aria-pressed", "true");
+
+    // --- Training
+    await goto(page, "Training");
+    await expect(page.getByRole("heading", { name: "Performance management chart" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Intensity distribution" })).toBeVisible();
+    await expect(page.locator(".zonebar")).toBeVisible();
+
+    // --- Data Explorer
+    await goto(page, "Data Explorer");
+    await expect(page.getByRole("heading", { name: "Capability catalog" })).toBeVisible();
+    await expect(page.locator("table tbody tr").first()).toBeVisible();
+
+    await page.getByRole("tab", { name: "Raw payloads" }).click();
+    await expect(page.getByRole("heading", { name: "Raw payloads" })).toBeVisible();
+    await page.locator("table tbody tr").first().click();
+    await expect(page.locator("pre.json")).toBeVisible();
+
+    // --- Connections
+    await goto(page, "Connections");
+    await expect(page.getByRole("heading", { name: "Garmin MCP" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Strava" })).toBeVisible();
+    await expect(page.getByText("Strava not connected.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Storage" })).toBeVisible();
+  });
+
+  test("units switch between metric and imperial everywhere", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Imperial" }).click();
+    await expect(page.getByRole("button", { name: "Imperial" })).toHaveAttribute("aria-pressed", "true");
+
+    await goto(page, "Activities");
+    await expect(page.locator("table tbody tr").first()).toBeVisible();
+    await expect(page.locator("table tbody").first()).toContainText("mi");
+
+    await goto(page, "Connections");
+    await page.getByRole("button", { name: "Metric" }).click();
+    await goto(page, "Activities");
+    await expect(page.locator("table tbody").first()).toContainText("km");
+  });
+
+  test("a disconnected Garmin MCP is reported, not hidden", async ({ page }) => {
+    await page.goto("/settings");
+    // The e2e server points GARMIN_MCP_URL at a closed port on purpose.
+    await expect(page.getByText(/cannot reach the Garmin MCP server/i)).toBeVisible();
+    await expect(page.getByText("garmin-mcp-readonly.sh")).toBeVisible();
+  });
+
+  test("the manual tool form refuses anything outside the read-only allowlist", async ({ page }) => {
+    await page.goto("/explorer");
+    await page.getByRole("tab", { name: "Run a read tool" }).click();
+
+    const options = await page.locator("select >> nth=0").locator("option").allTextContents();
+    const mutating = options.filter((option) =>
+      /^(set_|add_|create_|delete_|update_|upload_|log_|schedule_|download_)/.test(option.trim()),
+    );
+    expect(mutating, `mutating tools offered: ${mutating.join(", ")}`).toHaveLength(0);
+    expect(options.length).toBeGreaterThan(20);
+  });
+
+  test("empty and unavailable states explain themselves", async ({ page }) => {
+    await page.goto("/activities");
+    await page.getByLabel("Search name").fill("no-such-activity-anywhere");
+    await expect(page.getByText("No activities match these filters")).toBeVisible();
+    await expect(page.getByText(/widening the date range/i)).toBeVisible();
+  });
+
+  test("the dashboard is usable at a mobile viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+    await expect(page.locator(".readout-value").first()).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+});
+
+/** The page body must never scroll sideways; wide content scrolls in its own box. */
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const overflow = await page.evaluate(() => {
+    const el = document.documentElement;
+    return el.scrollWidth - el.clientWidth;
+  });
+  expect(overflow).toBeLessThanOrEqual(1);
+}

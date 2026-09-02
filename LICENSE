@@ -1,6 +1,10 @@
 MIT License
 
-Copyright (c) 2025 Alexandre Domingues
+Copyright (c) 2025 Alexandre Domingues and the garmin_mcp contributors
+    (the Garmin MCP server, src/garmin_mcp/ — https://github.com/Taxuspt/garmin_mcp)
+
+Copyright (c) 2026 Marius Dale
+    (Paceboard: src/paceboard_api/, dashboard/, scripts/, tests/paceboard/)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
