@@ -1,9 +1,11 @@
 /**
- * Activities — the combined, filterable table across both providers.
+ * Activities — the combined, filterable log across both providers.
  *
- * One row per canonical activity, with badges showing which providers recorded
- * it. Uncertain cross-provider matches surface in a review strip above the
- * table rather than being silently merged or silently ignored.
+ * One row per canonical activity, with badges showing which providers
+ * recorded it. Uncertain cross-provider matches surface in a review strip
+ * above the table rather than being silently merged or silently ignored.
+ * The effort bar is each session's training load as a percentage of the
+ * highest load on this page — a relative read, not an absolute scale.
  */
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -17,8 +19,19 @@ import {
 import { Empty, Failed, Loading } from "../components/States";
 import { SourceBadge, StatusBadge } from "../components/SourceBadge";
 import { RouteThumb } from "../components/RouteMap";
+import { Icon, sportIcon } from "../lib/icons";
 
 const PAGE_SIZE = 40;
+const SPORT_TOKEN: Record<string, { bg: string; fg: string }> = {
+  run: { bg: "var(--badge-strava-bg)", fg: "var(--badge-strava-fg)" },
+  walk: { bg: "var(--badge-strava-bg)", fg: "var(--badge-strava-fg)" },
+  hike: { bg: "var(--badge-strava-bg)", fg: "var(--badge-strava-fg)" },
+  ride: { bg: "var(--badge-garmin-bg)", fg: "var(--badge-garmin-fg)" },
+  swim: { bg: "var(--badge-garmin-bg)", fg: "var(--badge-garmin-fg)" },
+};
+function sportToken(sport: string) {
+  return SPORT_TOKEN[sport] ?? { bg: "var(--badge-paceboard-bg)", fg: "var(--badge-paceboard-fg)" };
+}
 
 export function Activities() {
   const units = useUnits();
@@ -48,6 +61,7 @@ export function Activities() {
   });
 
   const reset = (fn: () => void) => { fn(); setOffset(0); };
+  const maxLoad = Math.max(1, ...(query.data?.items.map((a) => a.training_load ?? 0) ?? [0]));
 
   return (
     <>
@@ -56,56 +70,48 @@ export function Activities() {
       <section className="panel">
         <div className="panel-head">
           <h1>Activities</h1>
+          {query.data && <span className="small faint mono">{query.data.page.total} sessions</span>}
           <span className="spacer" />
-          {query.data && (
-            <span className="small faint mono">
-              {query.data.page.total} total · showing {query.data.items.length}
-            </span>
-          )}
+          <input
+            value={search}
+            onChange={(e) => reset(() => setSearch(e.target.value))}
+            placeholder="Search sessions"
+            style={{ width: 200 }}
+          />
+          <a className="btn" href={api.exportUrl("csv", { dataset: "activities" })} download>Export CSV</a>
         </div>
 
-        <div className="panel-body">
-          <div className="toolbar">
-            <label className="field">
-              <span className="label">Search name</span>
-              <input
-                value={search}
-                onChange={(e) => reset(() => setSearch(e.target.value))}
-                placeholder="Morning run"
-                style={{ width: 180 }}
-              />
-            </label>
-            <label className="field">
-              <span className="label">Sport</span>
-              <select value={sport} onChange={(e) => reset(() => setSport(e.target.value))}>
-                <option value="">All sports</option>
-                {Object.entries(SPORT_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">Source</span>
-              <select value={source} onChange={(e) => reset(() => setSource(e.target.value))}>
-                <option value="">Both providers</option>
-                <option value="garmin">Garmin</option>
-                <option value="strava">Strava</option>
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">From</span>
-              <input type="date" value={start} onChange={(e) => reset(() => setStart(e.target.value))} />
-            </label>
-            <label className="field">
-              <span className="label">To</span>
-              <input type="date" value={end} onChange={(e) => reset(() => setEnd(e.target.value))} />
-            </label>
-            {(search || sport || source || start || end) && (
-              <button className="ghost" onClick={() => reset(() => { setSearch(""); setSport(""); setSource(""); setStart(""); setEnd(""); })}>
-                Clear filters
-              </button>
-            )}
-          </div>
+        <div className="panel-body toolbar" style={{ paddingTop: 0 }}>
+          <label className="field">
+            <span className="label">Sport</span>
+            <select value={sport} onChange={(e) => reset(() => setSport(e.target.value))}>
+              <option value="">All sports</option>
+              {Object.entries(SPORT_LABELS).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="label">Source</span>
+            <select value={source} onChange={(e) => reset(() => setSource(e.target.value))}>
+              <option value="">Both providers</option>
+              <option value="garmin">Garmin</option>
+              <option value="strava">Strava</option>
+            </select>
+          </label>
+          <label className="field">
+            <span className="label">From</span>
+            <input type="date" value={start} onChange={(e) => reset(() => setStart(e.target.value))} />
+          </label>
+          <label className="field">
+            <span className="label">To</span>
+            <input type="date" value={end} onChange={(e) => reset(() => setEnd(e.target.value))} />
+          </label>
+          {(search || sport || source || start || end) && (
+            <button className="ghost" onClick={() => reset(() => { setSearch(""); setSport(""); setSource(""); setStart(""); setEnd(""); })}>
+              Clear filters
+            </button>
+          )}
         </div>
 
         {query.isLoading ? (
@@ -125,14 +131,15 @@ export function Activities() {
               <table>
                 <thead>
                   <tr>
+                    <th></th>
                     {showMaps && <th>Route</th>}
-                    <th>Activity</th>
-                    <th>Sport</th>
+                    <th>Session</th>
                     <th className="n">Distance</th>
                     <th className="n">Moving</th>
                     <th className="n">{isPaceSport(sport) ? `Pace ${paceLabel(units)}` : "Pace / speed"}</th>
                     <th className="n">Ascent</th>
                     <th className="n">Avg HR</th>
+                    <th>Effort</th>
                     <th>Sources</th>
                   </tr>
                 </thead>
@@ -144,6 +151,7 @@ export function Activities() {
                       units={units}
                       timezone={timezone}
                       showMap={showMaps}
+                      maxLoad={maxLoad}
                     />
                   ))}
                 </tbody>
@@ -168,15 +176,22 @@ export function Activities() {
 }
 
 function ActivityRow({
-  activity, units, timezone, showMap,
-}: { activity: Activity; units: "metric" | "imperial"; timezone: string; showMap: boolean }) {
+  activity, units, timezone, showMap, maxLoad,
+}: { activity: Activity; units: "metric" | "imperial"; timezone: string; showMap: boolean; maxLoad: number }) {
   const paceValue = isPaceSport(activity.sport)
     ? pace(activity.avg_speed_mps, units)
     : speed(activity.avg_speed_mps, units);
   const paceUnit = isPaceSport(activity.sport) ? paceLabel(units) : ` ${speedLabel(units)}`;
+  const token = sportToken(activity.sport);
+  const pct = activity.training_load != null ? Math.round((activity.training_load / maxLoad) * 100) : null;
 
   return (
-    <tr>
+    <tr className="clickable">
+      <td style={{ width: 40 }}>
+        <span className="session-icon" style={{ width: 26, height: 26, background: token.bg, color: token.fg }} title={sportLabel(activity.sport)}>
+          <Icon name={sportIcon(activity.sport)} size={13} />
+        </span>
+      </td>
       {showMap && (
         <td style={{ width: 64 }}>
           {activity.has_gps ? <ThumbCell id={activity.id} /> : <span className="na-inline">—</span>}
@@ -186,12 +201,19 @@ function ActivityRow({
         <Link to={`/activities/${activity.id}`}>{activity.name ?? "Untitled activity"}</Link>
         <div className="small faint mono">{localTime(activity.start_time_utc, timezone)}</div>
       </td>
-      <td>{sportLabel(activity.sport)}</td>
       <td className="n">{distance(activity.distance_m, units) ?? "—"}</td>
       <td className="n">{duration(activity.moving_duration_s ?? activity.duration_s) ?? "—"}</td>
       <td className="n">{paceValue ? `${paceValue}${paceUnit}` : "—"}</td>
       <td className="n">{elevation(activity.elevation_gain_m, units) ?? "—"}</td>
       <td className="n">{round(activity.avg_hr, 0) ?? "—"}</td>
+      <td style={{ width: 100 }}>
+        {pct != null ? (
+          <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+            <span className="effort-bar"><span style={{ width: `${pct}%`, background: pct > 66 ? "var(--chart-primary)" : "var(--chart-secondary)" }} /></span>
+            <span className="small faint">{pct}</span>
+          </span>
+        ) : <span className="na-inline">—</span>}
+      </td>
       <td>
         <span className="row" style={{ gap: 4 }}>
           {activity.sources.map((s) => (

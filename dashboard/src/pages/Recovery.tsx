@@ -7,10 +7,11 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Metric, type RecoverySeries } from "../lib/api";
 import { dayLabel, hours, round } from "../lib/format";
-import { CHART, ChartFrame, StackedBars, TimeChart } from "../components/Charts";
+import { ChartFrame, StackedBars, TimeChart, useChartPalette } from "../components/Charts";
 import { Empty, Failed, Loading, Unavailable } from "../components/States";
 import { Readout, ReadoutRail } from "../components/Readout";
 import { SourceBadge } from "../components/SourceBadge";
+import { usePrefs, jargonLabel } from "../lib/prefs";
 
 const WINDOWS = [
   { days: 30, label: "30 days" },
@@ -25,6 +26,8 @@ interface Correlation {
 
 export function Recovery() {
   const [days, setDays] = useState(90);
+  const palette = useChartPalette();
+  const { jargon } = usePrefs();
 
   const series = useQuery({
     queryKey: ["recovery", days],
@@ -95,7 +98,7 @@ export function Recovery() {
         </div>
         <ReadoutRail>
           <Readout
-            label="HRV last night"
+            label={jargonLabel("Recovery last night", "HRV", jargon)}
             value={summary.data?.hrv_latest?.value != null ? String(Math.round(summary.data.hrv_latest.value)) : null}
             unit="ms"
             raw={summary.data?.hrv_latest?.value ?? null}
@@ -103,7 +106,7 @@ export function Recovery() {
             unavailableReason={summary.data?.hrv_latest?.unavailable_reason}
           />
           <Readout
-            label="HRV baseline"
+            label={jargonLabel("Recovery baseline", "HRV", jargon)}
             value={summary.data?.hrv_baseline?.value != null ? String(Math.round(summary.data.hrv_baseline.value)) : null}
             unit="ms"
             note="7-night trailing mean"
@@ -139,10 +142,10 @@ export function Recovery() {
             data={rows}
             height={210}
             series={[
-              { key: "deep", name: "Deep", color: "#1f4f8f", unit: "h", digits: 2 },
-              { key: "light", name: "Light", color: CHART.teal, unit: "h", digits: 2 },
-              { key: "rem", name: "REM", color: CHART.violet, unit: "h", digits: 2 },
-              { key: "awake", name: "Awake", color: CHART.grey, unit: "h", digits: 2 },
+              { key: "deep", name: "Deep", color: "var(--color-accent-2-300)", unit: "h", digits: 2 },
+              { key: "light", name: "Light", color: "var(--color-accent-2-600)", unit: "h", digits: 2 },
+              { key: "rem", name: "REM", color: "var(--color-accent-400)", unit: "h", digits: 2 },
+              { key: "awake", name: "Awake", color: palette.tertiary, unit: "h", digits: 2 },
             ]}
           />
         </ChartFrame>
@@ -154,20 +157,20 @@ export function Recovery() {
             syncId="recovery"
             rightAxis
             series={[
-              { key: "sleepHours", name: "Sleep", color: CHART.teal, unit: "h", digits: 2, type: "area" },
-              { key: "sleepScore", name: "Sleep score", color: CHART.violet, unit: "/100", digits: 0, type: "line", axis: "right" },
+              { key: "sleepHours", name: "Sleep", color: palette.secondary, unit: "h", digits: 2, type: "area" },
+              { key: "sleepScore", name: "Sleep score", color: palette.primary, unit: "/100", digits: 0, type: "line", axis: "right" },
             ]}
           />
         </ChartFrame>
 
-        <ChartFrame title="HRV and baseline" note="Baseline is a 7-night trailing mean; it only appears once 7 nights exist.">
+        <ChartFrame title={`${jargonLabel("Recovery", "HRV", jargon)} and baseline`} note="Baseline is a 7-night trailing mean; it only appears once 7 nights exist.">
           <TimeChart
             data={rows}
             height={200}
             syncId="recovery"
             series={[
-              { key: "hrv", name: "Overnight HRV", color: CHART.teal, unit: "ms", digits: 0, type: "line" },
-              { key: "hrvBase", name: "Baseline", color: CHART.grey, unit: "ms", digits: 1, type: "line", dashed: true },
+              { key: "hrv", name: `Overnight ${jargonLabel("recovery", "HRV", jargon)}`, color: palette.secondary, unit: "ms", digits: 0, type: "line" },
+              { key: "hrvBase", name: "Baseline", color: palette.tertiary, unit: "ms", digits: 1, type: "line", dashed: true },
             ]}
           />
         </ChartFrame>
@@ -178,23 +181,23 @@ export function Recovery() {
             height={200}
             syncId="recovery"
             series={[
-              { key: "rhr", name: "Resting HR", color: CHART.rose, unit: "bpm", digits: 0, type: "line" },
-              { key: "rhrBase", name: "Baseline", color: CHART.grey, unit: "bpm", digits: 1, type: "line", dashed: true },
+              { key: "rhr", name: "Resting HR", color: palette.primary, unit: "bpm", digits: 0, type: "line" },
+              { key: "rhrBase", name: "Baseline", color: palette.tertiary, unit: "bpm", digits: 1, type: "line", dashed: true },
             ]}
           />
         </ChartFrame>
 
-        <ChartFrame title="Body Battery">
+        <ChartFrame title={jargonLabel("Energy", "Body Battery", jargon)}>
           <TimeChart
             data={rows}
             height={200}
             syncId="recovery"
             zeroLine
             series={[
-              { key: "bbHigh", name: "Daily high", color: CHART.green, unit: "", digits: 0, type: "line" },
-              { key: "bbLow", name: "Daily low", color: CHART.amber, unit: "", digits: 0, type: "line" },
-              { key: "charged", name: "Charged", color: CHART.teal, unit: "", digits: 0, type: "bar" },
-              { key: "drained", name: "Drained", color: CHART.grey, unit: "", digits: 0, type: "bar" },
+              { key: "bbHigh", name: "Daily high", color: palette.secondary, unit: "", digits: 0, type: "line" },
+              { key: "bbLow", name: "Daily low", color: palette.quaternary, unit: "", digits: 0, type: "line" },
+              { key: "charged", name: "Charged", color: palette.secondaryFill, unit: "", digits: 0, type: "bar" },
+              { key: "drained", name: "Drained", color: palette.tertiary, unit: "", digits: 0, type: "bar" },
             ]}
           />
         </ChartFrame>
@@ -206,9 +209,9 @@ export function Recovery() {
             syncId="recovery"
             rightAxis
             series={[
-              { key: "stress", name: "Avg stress", color: CHART.amber, unit: "", digits: 0, type: "area" },
-              { key: "readiness", name: "Training readiness", color: CHART.violet, unit: "/100", digits: 0, type: "line" },
-              { key: "respiration", name: "Respiration", color: CHART.teal, unit: "br/min", digits: 1, type: "line", axis: "right" },
+              { key: "stress", name: "Avg stress", color: palette.quaternary, unit: "", digits: 0, type: "area" },
+              { key: "readiness", name: "Training readiness", color: palette.secondary, unit: "/100", digits: 0, type: "line" },
+              { key: "respiration", name: "Respiration", color: palette.primary, unit: "br/min", digits: 1, type: "line", axis: "right" },
             ]}
           />
         </ChartFrame>

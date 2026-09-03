@@ -7,18 +7,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api, type AppSettings, type Connection, type StravaStatus, type SyncRun,
 } from "../lib/api";
-import { useLatestSync, useStartSync } from "../lib/hooks";
+import { useLatestSync, useStartSync, useStatus } from "../lib/hooks";
 import { bytes, localTime, relativeAge } from "../lib/format";
 import { Failed, Loading } from "../components/States";
 import { SourceBadge, StatusBadge } from "../components/SourceBadge";
+import { usePrefs, type Appearance } from "../lib/prefs";
 
 export function Settings() {
   const client = useQueryClient();
   const connections = useQuery({ queryKey: ["connections"], queryFn: () => api.get<Connection[]>("/connections") });
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<AppSettings>("/settings") });
   const strava = useQuery({ queryKey: ["strava-status"], queryFn: () => api.get<StravaStatus>("/auth/strava/status") });
+  const status = useStatus();
   const sync = useLatestSync();
   const start = useStartSync();
+  const { appearance, setAppearance, jargon, setJargon } = usePrefs();
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.put<AppSettings>("/settings", body),
@@ -42,7 +45,21 @@ export function Settings() {
   return (
     <>
       <section className="panel">
-        <div className="panel-head"><h1>Connections</h1></div>
+        <div className="panel-head">
+          <h1>Connections</h1>
+          <span className="spacer" />
+          {status.data?.freshness && status.data.freshness.length > 0 && (
+            <span className="row small faint" style={{ gap: 12 }}>
+              {status.data.freshness.map((f) => (
+                <span key={`${f.provider}:${f.category}`} className="row" style={{ gap: 5 }}>
+                  <SourceBadge source={f.provider} />
+                  <span>{f.category}</span>
+                  <span className="mono">{relativeAge(f.age_seconds) ?? "never"}</span>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
         <div className="grid g2" style={{ padding: 13 }}>
           <GarminCard connection={garmin} />
           <StravaCard connection={stravaConn} status={strava.data} onChange={() => {
@@ -109,6 +126,27 @@ export function Settings() {
                   Imperial
                 </button>
               </div>
+            </div>
+
+            <div className="field">
+              <span className="label" id="appearance-label">Appearance</span>
+              <div className="segmented" role="group" aria-labelledby="appearance-label">
+                {(["light", "dark", "auto"] as Appearance[]).map((value) => (
+                  <button key={value} aria-pressed={appearance === value} onClick={() => setAppearance(value)}>
+                    {value === "auto" ? "Auto" : value === "light" ? "Light" : "Dark"}
+                  </button>
+                ))}
+              </div>
+              <span className="small faint">Auto follows this computer's system setting.</span>
+            </div>
+
+            <div className="field">
+              <span className="label" id="jargon-label">Technical labels</span>
+              <div className="segmented" role="group" aria-labelledby="jargon-label">
+                <button aria-pressed={!jargon} onClick={() => setJargon(false)}>Off</button>
+                <button aria-pressed={jargon} onClick={() => setJargon(true)}>On</button>
+              </div>
+              <span className="small faint">Show CTL, ATL, TSB and similar alongside their plain names. Hovering a label always shows the technical definition.</span>
             </div>
 
             <NumberSetting
@@ -218,14 +256,14 @@ function GarminCard({ connection }: { connection?: Connection }) {
 
   const ok = connection?.status === "connected";
   return (
-    <div className="panel" style={{ background: "var(--surface-2)" }}>
-      <div className="panel-head">
-        <SourceBadge source="garmin" />
+    <div className="provider-card" style={{ background: "var(--surface-2)" }}>
+      <div className="row" style={{ gap: 9 }}>
+        <span className="provider-badge" style={{ background: "var(--badge-garmin-bg)", color: "var(--badge-garmin-fg)" }}>G</span>
         <h2>Garmin MCP</h2>
         <span className="spacer" />
         <StatusBadge status={connection?.status ?? "unknown"} />
       </div>
-      <div className="panel-body stack">
+      <div className="stack" style={{ marginTop: 12 }}>
         <dl className="kv">
           <dt>Endpoint</dt><dd className="small">{connection?.endpoint}</dd>
           <dt>Transport</dt><dd className="small">streamable HTTP · read-only</dd>
@@ -236,10 +274,12 @@ function GarminCard({ connection }: { connection?: Connection }) {
         {connection?.last_error && <div className="banner err small">{connection.last_error}</div>}
         {!ok && (
           <div className="banner warn small">
-            Paceboard cannot reach the Garmin MCP server, so Garmin syncs will
-            fail. Start it with <code>./scripts/garmin-mcp-readonly.sh</code> and
-            check that it answers on{" "}
-            <code>{(connection?.endpoint ?? "http://127.0.0.1:8000/mcp").replace("/mcp", "/healthz")}</code>.
+            <span>
+              Paceboard cannot reach the Garmin MCP server, so Garmin syncs will
+              fail. Start it with <code>./scripts/garmin-mcp-readonly.sh</code> and
+              check that it answers on{" "}
+              <code>{(connection?.endpoint ?? "http://127.0.0.1:8000/mcp").replace("/mcp", "/healthz")}</code>.
+            </span>
           </div>
         )}
         <div className="row">
@@ -279,14 +319,14 @@ function StravaCard({
   const connected = status?.connected ?? false;
 
   return (
-    <div className="panel" style={{ background: "var(--surface-2)" }}>
-      <div className="panel-head">
-        <SourceBadge source="strava" />
+    <div className="provider-card" style={{ background: "var(--surface-2)" }}>
+      <div className="row" style={{ gap: 9 }}>
+        <span className="provider-badge" style={{ background: "var(--badge-strava-bg)", color: "var(--badge-strava-fg)" }}>S</span>
         <h2>Strava</h2>
         <span className="spacer" />
         <StatusBadge status={connected ? "connected" : configured ? "not_connected" : "not_configured"} />
       </div>
-      <div className="panel-body stack">
+      <div className="stack" style={{ marginTop: 12 }}>
         {!configured ? (
           <>
             <div className="banner warn small">

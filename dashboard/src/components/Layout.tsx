@@ -1,15 +1,16 @@
-/** App shell: navigation rail, top bar with live sync state, content area. */
+/** App shell: icon nav rail, top bar with live sync state, content area. */
 import { NavLink, Outlet } from "react-router-dom";
 import { useLatestSync, useStartSync, useStatus } from "../lib/hooks";
 import { localTime, relativeAge } from "../lib/format";
+import { Icon, navIcon } from "../lib/icons";
 
 const NAV = [
-  { to: "/", label: "Overview", glyph: "◎", end: true },
-  { to: "/activities", label: "Activities", glyph: "▤" },
-  { to: "/recovery", label: "Recovery", glyph: "◍" },
-  { to: "/training", label: "Training", glyph: "◈" },
-  { to: "/explorer", label: "Data Explorer", glyph: "⌗" },
-  { to: "/settings", label: "Connections", glyph: "⚙" },
+  { to: "/", label: "Overview", end: true },
+  { to: "/activities", label: "Activities" },
+  { to: "/recovery", label: "Recovery" },
+  { to: "/training", label: "Training" },
+  { to: "/explorer", label: "Your data" },
+  { to: "/settings", label: "Connections" },
 ];
 
 export function Layout() {
@@ -25,19 +26,20 @@ export function Layout() {
       <nav className="rail" aria-label="Sections">
         <div className="rail-brand">
           <strong>Paceboard</strong>
-          <span>Local training data</span>
+          <span>Your data, your machine</span>
         </div>
         <div className="rail-nav">
           {NAV.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
-              <span className="glyph" aria-hidden="true">{item.glyph}</span>
+              <span className="glyph" aria-hidden="true"><Icon name={navIcon(item.label)} size={16} /></span>
               {item.label}
             </NavLink>
           ))}
         </div>
-        <div className="rail-foot small faint">
-          <div className="mono">v{status.data?.version ?? "—"}</div>
-          <div>{status.data?.bound_host ?? "127.0.0.1"} · local only</div>
+        <div className="rail-foot">
+          <div className="row"><span className={`dot ${running ? "warn" : "ok"}`} />Synced {relativeAge(lastFinished ? (Date.now() - new Date(`${lastFinished}Z`).getTime()) / 1000 : null) ?? "never"}</div>
+          <div style={{ marginTop: 3 }}>Nothing leaves this computer.</div>
+          <div className="mono" style={{ marginTop: 6, opacity: 0.7 }}>v{status.data?.version ?? "—"}</div>
         </div>
       </nav>
 
@@ -107,7 +109,7 @@ function SyncPill() {
           <>
             Sync {data.status} · <span className="mono">{data.records_written}</span> records
             {data.errors_count > 0 && (
-              <> · <span style={{ color: "var(--amber)" }}>{data.errors_count} issue{data.errors_count === 1 ? "" : "s"}</span></>
+              <> · <span style={{ color: "var(--danger)" }}>{data.errors_count} issue{data.errors_count === 1 ? "" : "s"}</span></>
             )}
             {age && <span className="faint"> · {age}</span>}
           </>
