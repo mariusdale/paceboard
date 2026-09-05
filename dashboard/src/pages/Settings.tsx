@@ -19,6 +19,8 @@ export function Settings() {
   const strava = useQuery({ queryKey: ["strava-status"], queryFn: () => api.get<StravaStatus>("/auth/strava/status") });
   const sync = useLatestSync();
   const start = useStartSync();
+  const [backfillPreset, setBackfillPreset] = useState("default");
+  const [customDays, setCustomDays] = useState("365");
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.put<AppSettings>("/settings", body),
@@ -37,7 +39,10 @@ export function Settings() {
 
   const garmin = connections.data!.find((c) => c.provider === "garmin");
   const stravaConn = connections.data!.find((c) => c.provider === "strava");
+  if (settings.isError) return <section className="panel"><Failed error={settings.error} retry={settings.refetch} /></section>;
   const config = settings.data!;
+  const backfillDays = backfillPreset === "default" ? config.backfill_days : Number(backfillPreset === "custom" ? customDays : backfillPreset);
+  const validBackfill = Number.isInteger(backfillDays) && backfillDays >= 1 && backfillDays <= 3650;
 
   return (
     <>
@@ -67,11 +72,24 @@ export function Settings() {
             >
               Sync recent days
             </button>
+            <label className="field">
+              <span className="label">Backfill history</span>
+              <select aria-label="Backfill history" value={backfillPreset} onChange={e => setBackfillPreset(e.target.value)}>
+                <option value="default">Saved default ({config.backfill_days} days)</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Last 365 days</option>
+                <option value="custom">Custom number of days</option>
+              </select>
+            </label>
+            {backfillPreset === "custom" && <label className="field">
+              <span className="label">Custom backfill days</span>
+              <input type="number" min={1} max={3650} step={1} value={customDays} onChange={e => setCustomDays(e.target.value)} aria-invalid={!validBackfill} aria-describedby="backfill-help" />
+            </label>}
             <button
-              disabled={sync.data?.status === "running" || start.isPending}
-              onClick={() => start.mutate({ providers: ["garmin", "strava"], mode: "backfill" })}
+              disabled={!validBackfill || sync.data?.status === "running" || start.isPending}
+              onClick={() => start.mutate({ providers: ["garmin", "strava"], mode: "backfill", ...backfillWindow(backfillDays, config.timezone) })}
             >
-              Backfill {config.backfill_days} days
+              Backfill {validBackfill ? backfillDays : "custom"} days
             </button>
             <button
               disabled={sync.data?.status === "running" || start.isPending}
@@ -88,6 +106,8 @@ export function Settings() {
               </button>
             )}
           </div>
+          <p id="backfill-help" className="small muted">Choose 1–3,650 days, including today. Larger imports take longer and may need another run after provider rate limits reset.</p>
+          {start.isError && <div role="alert" className="banner err">{start.error.message}</div>}
           <SyncDetail run={sync.data ?? null} />
         </div>
       </section>
@@ -466,4 +486,14 @@ function DangerZone({ onDone }: { onDone: () => void }) {
       {result && <p className="small" style={{ marginBottom: 0 }}>{result}</p>}
     </div>
   );
+}
+
+/** Send explicit dates so the UI also works with an already-running older API. */
+function backfillWindow(days: number, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const part = (type: string) => parts.find(p => p.type === type)!.value;
+  const end = `${part("year")}-${part("month")}-${part("day")}`;
+  const first = new Date(`${end}T12:00:00Z`);
+  first.setUTCDate(first.getUTCDate() - days + 1);
+  return { start: first.toISOString().slice(0, 10), end };
 }

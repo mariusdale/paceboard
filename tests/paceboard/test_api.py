@@ -501,3 +501,36 @@ class TestDuplicateReview:
     def test_a_missing_candidate_is_a_typed_404(self, client, seeded):
         assert client.post("/api/v1/activities/duplicates/999",
                            params={"accept": True}).status_code == 404
+
+class TestBackfillWindow:
+    @pytest.mark.parametrize('days', [1, 90, 365, 730, 3650])
+    def test_requested_days_reach_sync_as_inclusive_window(self, client, monkeypatch, days):
+        from paceboard_api.api.routers import sync as routes
+        requests = []
+        async def capture(request):
+            requests.append(request)
+        monkeypatch.setattr(routes, '_run_guarded', capture)
+        response = client.post('/api/v1/sync', json={'mode': 'backfill', 'days': days})
+        assert response.status_code == 200
+        assert len(requests) == 1
+        assert (requests[0].end - requests[0].start).days + 1 == days
+
+    def test_saved_window_is_used_without_days(self, client, monkeypatch):
+        from paceboard_api.api.routers import sync as routes
+        requests = []
+        async def capture(request):
+            requests.append(request)
+        monkeypatch.setattr(routes, '_run_guarded', capture)
+        assert client.put('/api/v1/settings', json={'backfill_days': 420}).status_code == 200
+        assert client.post('/api/v1/sync', json={'mode': 'backfill'}).status_code == 200
+        assert (requests[0].end - requests[0].start).days + 1 == 420
+
+    @pytest.mark.parametrize('body', [
+        {'mode': 'backfill', 'days': 0}, {'mode': 'backfill', 'days': 3651},
+        {'mode': 'backfill', 'days': 1.5}, {'mode': 'backfill', 'days': True},
+        {'mode': 'incremental', 'days': 365},
+        {'mode': 'backfill', 'days': 365, 'start': '2025-01-01'},
+        {'mode': 'backfill', 'start': '2026-01-02', 'end': '2026-01-01'},
+    ])
+    def test_invalid_window_is_rejected(self, client, body):
+        assert client.post('/api/v1/sync', json=body).status_code == 422

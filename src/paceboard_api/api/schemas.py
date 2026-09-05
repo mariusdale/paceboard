@@ -13,7 +13,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic_core import PydanticCustomError
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SourceName = Literal["garmin", "strava"]
 
@@ -89,6 +91,15 @@ class SyncRequestBody(ApiModel):
     start: Optional[date] = None
     end: Optional[date] = None
     enrich: bool = True
+    days: Optional[int] = Field(default=None, ge=1, le=3650, strict=True)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.days is not None and (self.mode != "backfill" or self.start is not None or self.end is not None):
+            raise PydanticCustomError("invalid_window", "days is only valid for backfill without explicit start/end dates")
+        if self.start and self.end and self.start > self.end:
+            raise PydanticCustomError("invalid_window", "start must not be after end")
+        return self
 
 
 class SyncRunResponse(ApiModel):

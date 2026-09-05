@@ -27,7 +27,7 @@ Install [Node.js 22 or newer](https://nodejs.org/),
 through uv and uses the checked-in dependency lockfiles.
 
 ```bash
-git clone --branch codex/open-source-release https://github.com/mariusdale/paceboard.git
+git clone https://github.com/mariusdale/paceboard.git
 cd paceboard
 ./scripts/setup.sh
 ./scripts/start.sh
@@ -47,7 +47,9 @@ Your data stays saved for the next run.
 
 1. Open **Connections** in the dashboard.
 2. If you configured Strava, click **Connect** and approve access in Strava.
-3. Run a **Backfill** to import your history. The default window is 90 days.
+3. Under **Sync → Backfill history**, choose **Last 90 days**, **Last 365 days**,
+   or **Custom number of days** (1–3,650), then click **Backfill**.
+   All windows include today; your saved default remains available.
 4. Watch the sync status, then open **Overview**. A large import may take time;
    provider rate limits can delay it. Rerun the backfill to resume.
 

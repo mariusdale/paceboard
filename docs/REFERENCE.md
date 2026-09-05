@@ -705,3 +705,10 @@ and forwards API requests to the local Paceboard backend on port 8787.
 Use `PACEBOARD_WEB_PORT` and `PACEBOARD_API_PORT` to override those ports.
 The server binds only to loopback and does not require a Vite development session.
 Rebuild after frontend edits. The backend and Garmin MCP must also be running.
+
+### Backfill history selection
+
+Connections → Sync offers 90 days, 365 days, or a custom 1–3,650 days.
+The sync API accepts `{"mode":"backfill","days":365}`; days includes today
+in the configured timezone and cannot be combined with explicit start/end dates.
+Without a window, a backfill uses the saved Backfill window preference.
