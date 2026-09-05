@@ -25,7 +25,7 @@ import {
   sportLabel,
   temperature,
 } from "../lib/format";
-import { TimeChart, useChartPalette, type Palette, type SeriesSpec } from "../components/Charts";
+import { CHART, TimeChart, type SeriesSpec } from "../components/Charts";
 import {
   Empty,
   Failed,
@@ -35,7 +35,6 @@ import {
 } from "../components/States";
 import { SourceBadge, StatusBadge } from "../components/SourceBadge";
 import { RouteTrace, osmLink } from "../components/RouteMap";
-import { Icon } from "../lib/icons";
 
 interface Analysis {
   activity_id: number;
@@ -101,7 +100,6 @@ export function ActivityDetail() {
   const units = useUnits();
   const timezone = useTimezone();
   const settings = useSettings();
-  const palette = useChartPalette();
   const [showRaw, setShowRaw] = useState(false);
 
   const activity = useQuery({
@@ -144,15 +142,12 @@ export function ActivityDetail() {
     );
 
   const a = activity.data!;
-  const chartData = buildChartData(streams.data, units, a.sport, palette);
+  const chartData = buildChartData(streams.data, units, a.sport);
   const showMaps = settings.data?.show_maps ?? false;
   const hasRoute = streams.data?.available && streams.data.channels.lat;
 
   return (
     <>
-      <Link to="/activities" className="row small" style={{ gap: 5, width: "fit-content" }}>
-        <Icon name="chevronLeft" size={13} /> All activities
-      </Link>
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -556,7 +551,6 @@ function buildChartData(
   streams: StreamSet | undefined,
   units: "metric" | "imperial",
   sport: string,
-  palette: Palette,
 ) {
   const empty = {
     rows: [] as Record<string, any>[],
@@ -618,7 +612,7 @@ function buildChartData(
             {
               key: "paceMin",
               name: `Pace`,
-              color: palette.secondary,
+              color: CHART.teal,
               unit: `min${paceLabel(units)}`,
               digits: 2,
               type: "line",
@@ -628,7 +622,7 @@ function buildChartData(
             {
               key: "speed",
               name: "Speed",
-              color: palette.secondary,
+              color: CHART.teal,
               unit: speedLabel(units),
               digits: 1,
               type: "line",
@@ -644,7 +638,7 @@ function buildChartData(
         {
           key: "hr",
           name: "Heart rate",
-          color: palette.primary,
+          color: CHART.rose,
           unit: "bpm",
           digits: 0,
           type: "area",
@@ -660,7 +654,7 @@ function buildChartData(
         {
           key: "altitude",
           name: "Elevation",
-          color: palette.tertiary,
+          color: CHART.grey,
           unit: "m",
           digits: 0,
           type: "area",
@@ -677,7 +671,7 @@ function buildChartData(
         {
           key: "watts",
           name: "Power",
-          color: palette.quaternary,
+          color: CHART.amber,
           unit: "W",
           digits: 0,
           type: "area",
@@ -693,7 +687,7 @@ function buildChartData(
         {
           key: "cadence",
           name: "Cadence",
-          color: palette.quinary,
+          color: CHART.violet,
           unit: "rpm",
           digits: 0,
           type: "line",
@@ -710,7 +704,7 @@ function buildChartData(
         {
           key: "temp",
           name: "Temperature",
-          color: palette.tertiary,
+          color: CHART.green,
           unit: "°C",
           digits: 0,
           type: "line",

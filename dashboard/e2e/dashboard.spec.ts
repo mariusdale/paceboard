@@ -27,20 +27,15 @@ test.describe("Paceboard dashboard", () => {
     await expect(page.getByTestId("fixture-banner")).toContainText("Fixture mode");
 
     // --- Overview
-    await expect(page.getByRole("heading", { name: "Today against your own baseline" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Training load and form" })).toBeVisible();
-
-    const readouts = page.locator(".readout-value");
-    await expect(readouts.first()).toBeVisible();
-    expect(await readouts.count()).toBeGreaterThan(3);
-
-    // The form panel must show computed numbers, not placeholders.
-    const ctl = page.locator(".panel-head .mono").first();
-    await expect(ctl).toHaveText(/\d/);
-
-    await expect(page.getByRole("heading", { name: "Recent activities" })).toBeVisible();
-    const recentRows = page.locator("table tbody tr");
-    expect(await recentRows.count()).toBeGreaterThan(0);
+    await expect(page.getByRole("heading", { name: "Your night, at a glance" })).toBeVisible();
+    await expect(page.locator(".score-center > span")).toHaveText(/\d/);
+    await expect(page.locator(".vital")).toHaveCount(4);
+    await expect(page.getByRole("heading", { name: "Your rhythm over time" })).toBeVisible();
+    await page.getByRole("button", { name: "HRV", exact: true }).click();
+    await expect(page.getByRole("button", { name: "HRV", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "7D", exact: true }).click();
+    await expect(page.getByRole("button", { name: "7D", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".activity-item").first()).toBeVisible();
 
     // --- Activities
     await goto(page, "Activities");
@@ -148,11 +143,37 @@ test.describe("Paceboard dashboard", () => {
     await expect(page.getByText(/widening the date range/i)).toBeVisible();
   });
 
+  test("backfill supports a year and custom days with validation", async ({ page }) => {
+    const requests: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/sync", async route => {
+      if (route.request().method() === "POST") {
+        requests.push(route.request().postDataJSON());
+        await route.fulfill({ json: { accepted: true } });
+      } else await route.continue();
+    });
+    await page.goto("/settings");
+    await page.getByLabel("Backfill history", { exact: true }).selectOption("365");
+    await page.getByRole("button", { name: "Backfill 365 days", exact: true }).click();
+    await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]).toMatchObject({ mode: "backfill" });
+    const windowDays = (request: Record<string, unknown>) => (Date.parse(String(request.end)) - Date.parse(String(request.start))) / 86400000 + 1;
+    expect(windowDays(requests[0])).toBe(365);
+    await page.getByLabel("Backfill history", { exact: true }).selectOption("custom");
+    await page.getByLabel("Custom backfill days").fill("730");
+    await page.getByRole("button", { name: "Backfill 730 days", exact: true }).click();
+    await expect.poll(() => requests.length).toBe(2);
+    expect(windowDays(requests[1])).toBe(730);
+    await page.getByLabel("Custom backfill days").fill("0");
+    await expect(page.getByRole("button", { name: "Backfill custom days" })).toBeDisabled();
+    await page.getByLabel("Custom backfill days").fill("3651");
+    await expect(page.getByRole("button", { name: "Backfill custom days" })).toBeDisabled();
+  });
+
   test("the dashboard is usable at a mobile viewport", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Overview", exact: true })).toBeVisible();
-    await expect(page.locator(".readout-value").first()).toBeVisible();
+    await expect(page.locator(".vital-value").first()).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 });

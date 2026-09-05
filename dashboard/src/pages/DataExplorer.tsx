@@ -9,9 +9,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { api, type Capability, type RawPayloadRow, type Status, type ToolSpec } from "../lib/api";
-import { useStatus, useTimezone } from "../lib/hooks";
-import { bytes, localTime, relativeAge } from "../lib/format";
+import { api, type Capability, type RawPayloadRow, type ToolSpec } from "../lib/api";
+import { useTimezone } from "../lib/hooks";
+import { bytes, localTime } from "../lib/format";
 import { Empty, Failed, Loading } from "../components/States";
 import { SourceBadge, StatusBadge } from "../components/SourceBadge";
 import { JsonViewer } from "../components/JsonViewer";
@@ -27,27 +27,12 @@ interface RawList {
 export function DataExplorer() {
   const [params] = useSearchParams();
   const [tab, setTab] = useState<Tab>(params.get("reference") ? "payloads" : "capabilities");
-  const status = useStatus();
 
   return (
     <>
-      <section className="hero">
-        <div style={{ maxWidth: 700 }}>
-          <div className="hero-eyebrow">Your data</div>
-          <h1 style={{ fontSize: 27 }}>Everything Paceboard has pulled, and nothing it hasn't.</h1>
-          <p>
-            Every provider response is stored verbatim, including the ones that returned
-            nothing — a metric with no data is visibly recorded as such, never silently missing.
-          </p>
-        </div>
-      </section>
-
-      <DataTiles status={status.data} />
-
       <section className="panel">
         <div className="panel-head">
-          <h2>By source</h2>
-          <span className="small faint">where each kind of number comes from, and how fresh it is</span>
+          <h1>Data Explorer</h1>
           <span className="spacer" />
           <div className="segmented" role="tablist" aria-label="Explorer view">
             <button role="tab" aria-pressed={tab === "capabilities"} onClick={() => setTab("capabilities")}>Capabilities</button>
@@ -55,45 +40,18 @@ export function DataExplorer() {
             <button role="tab" aria-pressed={tab === "invoke"} onClick={() => setTab("invoke")}>Run a read tool</button>
           </div>
         </div>
-        {status.data?.freshness && status.data.freshness.length > 0 && (
-          <div className="panel-body row" style={{ gap: 18 }}>
-            {status.data.freshness.map((f) => (
-              <span key={`${f.provider}:${f.category}`} className="row small">
-                <SourceBadge source={f.provider} />
-                <span className="muted">{f.category}</span>
-                <span className="mono">{relativeAge(f.age_seconds) ?? "never"}</span>
-                {f.cursor_date && <span className="faint">through {f.cursor_date}</span>}
-              </span>
-            ))}
-          </div>
-        )}
+        <div className="panel-body small muted">
+          Every provider response Paceboard has ever received is stored verbatim,
+          including the ones that returned nothing. That is what makes the coverage
+          below honest: a metric with no data is visibly recorded as such rather
+          than silently missing.
+        </div>
       </section>
 
       {tab === "capabilities" && <Capabilities />}
       {tab === "payloads" && <Payloads initialReference={params.get("reference") ?? ""} />}
       {tab === "invoke" && <Invoke />}
     </>
-  );
-}
-
-function DataTiles({ status }: { status?: Status }) {
-  if (!status) return null;
-  const tiles = [
-    { label: "Activities stored", value: status.counts.activities?.toLocaleString("en-US") ?? "0" },
-    { label: "Days of daily metrics", value: status.counts.daily_health?.toLocaleString("en-US") ?? "0" },
-    { label: "Providers connected", value: `${status.freshness.length ? new Set(status.freshness.map((f) => f.provider)).size : 0}`, sub: "of 3 supported" },
-    { label: "Database", value: bytes(status.database_bytes) ?? "—", sub: "on this machine only" },
-  ];
-  return (
-    <div className="grid g4">
-      {tiles.map((t) => (
-        <div key={t.label} className="stat-card" style={{ padding: "13px 15px" }}>
-          <span className="label">{t.label}</span>
-          <div className="stat-value" style={{ fontSize: 27, marginTop: 5 }}>{t.value}</div>
-          {t.sub && <div className="stat-sub">{t.sub}</div>}
-        </div>
-      ))}
-    </div>
   );
 }
 

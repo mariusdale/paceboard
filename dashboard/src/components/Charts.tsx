@@ -2,26 +2,29 @@
  * Shared chart primitives.
  *
  * All charts share one tooltip, one axis treatment and one palette so a colour
- * means the same thing on every page: terracotta (--chart-primary) for load,
- * effort and "look here", sage (--chart-secondary) for fitness and recovery,
- * and neutral tones for comparisons and baselines. Series names are always
- * spelled out in the legend — colour alone never carries meaning, for the
- * sake of readers who cannot distinguish them.
- *
- * Colours are read from the CSS custom properties in styles.css rather than
- * hard-coded, so every chart repaints when the appearance preference (or the
- * OS, in "auto") switches between light and dark.
+ * means the same thing on every page: teal for the system's own series, amber
+ * for load and effort, violet for recovery, and the fixed five-step zone ramp.
+ * Series names are always spelled out in the legend — colour alone never carries
+ * meaning, for the sake of readers who cannot distinguish them.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, ComposedChart,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { usePrefs } from "../lib/prefs";
+
+export const CHART = {
+  teal: "#77e5c0",
+  amber: "#edbe7d",
+  violet: "#aaa7ff",
+  rose: "#c4405c",
+  green: "#28a06a",
+  grey: "#8b95a1",
+  zones: ["#7c8794", "#2f7fb5", "#1f8f6a", "#cc7a12", "#bb2f45"],
+};
 
 /** Reads the resolved value of a CSS custom property so charts follow the theme. */
 export function useThemeColor(variable: string, fallback: string): string {
-  const { appearance } = usePrefs();
   const [color, setColor] = useState(fallback);
   useEffect(() => {
     const read = () => {
@@ -32,29 +35,8 @@ export function useThemeColor(variable: string, fallback: string): string {
     const media = matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", read);
     return () => media.removeEventListener("change", read);
-    // `appearance` isn't read directly, but an explicit switch must re-resolve
-    // the variable immediately rather than waiting on a system event.
-  }, [variable, appearance]);
+  }, [variable]);
   return color;
-}
-
-export interface Palette {
-  primary: string; primaryFill: string;
-  secondary: string; secondaryFill: string;
-  tertiary: string; quaternary: string; quinary: string;
-}
-
-/** The chart palette as live values, recomputed whenever the theme changes. */
-export function useChartPalette(): Palette {
-  return {
-    primary: useThemeColor("--chart-primary", "#b2622d"),
-    primaryFill: useThemeColor("--chart-primary-fill", "#ffc6a5"),
-    secondary: useThemeColor("--chart-secondary", "#56633f"),
-    secondaryFill: useThemeColor("--chart-secondary-fill", "#ccdbb2"),
-    tertiary: useThemeColor("--chart-tertiary", "#a19786"),
-    quaternary: useThemeColor("--chart-quaternary", "#f6a06b"),
-    quinary: useThemeColor("--chart-quinary", "#82796a"),
-  };
 }
 
 export interface SeriesSpec {
@@ -140,9 +122,9 @@ export function TimeChart({
             s.type === "bar" ? (
               <Bar key={s.key} yAxisId={s.axis ?? "left"} dataKey={s.key} name={s.name} fill={s.color} radius={[2, 2, 0, 0]} isAnimationActive={false} />
             ) : s.type === "area" ? (
-              <Area key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} fill={s.color} fillOpacity={0.18} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls />
+              <Area key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} fill={s.color} fillOpacity={0.14} strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls={false} />
             ) : (
-              <Line key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={1.8} strokeDasharray={s.dashed ? "4 3" : undefined} dot={false} isAnimationActive={false} connectNulls />
+              <Line key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={1.6} strokeDasharray={s.dashed ? "4 3" : undefined} dot={false} isAnimationActive={false} connectNulls={false} />
             ),
           )}
         </ComposedChart>
@@ -164,7 +146,7 @@ export function StackedBars({
           <YAxis tickLine={false} axisLine={false} width={46} />
           <Tooltip content={<TipContent series={series} />} cursor={{ fill: "var(--surface-inset)" }} />
           {series.map((s) => (
-            <Bar key={s.key} dataKey={s.key} name={s.name} stackId="a" fill={s.color} radius={s === series[series.length - 1] ? [2, 2, 0, 0] : undefined} isAnimationActive={false} />
+            <Bar key={s.key} dataKey={s.key} name={s.name} stackId="a" fill={s.color} isAnimationActive={false} />
           ))}
         </BarChart>
       </ResponsiveContainer>
@@ -178,7 +160,7 @@ export function Sparkline({ values, color, height = 34 }: { values: (number | nu
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-        <Area type="monotone" dataKey="v" stroke={color} fill={color} fillOpacity={0.2} strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
+        <Area type="monotone" dataKey="v" stroke={color} fill={color} fillOpacity={0.16} strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls={false} />
       </AreaChart>
     </ResponsiveContainer>
   );

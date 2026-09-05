@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks
@@ -11,7 +12,7 @@ from sqlalchemy import select
 from ...db.models import SyncError, SyncRun
 from ...ingest.sync import SyncRequest, request_cancel, run_sync
 from ...logging_conf import get_logger
-from ..deps import PaginationDep, SessionDep
+from ..deps import PaginationDep, SessionDep, SettingsDep
 from ..errors import conflict, not_found
 from ..schemas import SyncRequestBody, SyncRunResponse
 
@@ -36,7 +37,7 @@ async def _run_guarded(request: SyncRequest) -> None:
 
 @router.post("", response_model=dict, summary="Start a sync run")
 async def start_sync(
-    body: SyncRequestBody, session: SessionDep, background: BackgroundTasks
+    body: SyncRequestBody, session: SessionDep, background: BackgroundTasks, settings: SettingsDep
 ) -> dict[str, Any]:
     running = session.execute(
         select(SyncRun).where(SyncRun.status == "running").limit(1)
@@ -46,12 +47,20 @@ async def start_sync(
             f"A sync is already running (run {running.id})" if running
             else "A sync is already running"
         )
+    start, end = body.start, body.end
+    if body.mode == "backfill" and start is None:
+        from .settings_router import read_settings
+        days = body.days if body.days is not None else int(
+            read_settings(session).get("backfill_days", settings.backfill_days)
+        )
+        end = end or datetime.now(settings.tzinfo).date()
+        start = end - timedelta(days=days - 1)
     request = SyncRequest(
         providers=tuple(body.providers),
         mode=body.mode,
         categories=tuple(body.categories),
-        start=body.start,
-        end=body.end,
+        start=start,
+        end=end,
         trigger="manual",
         enrich=body.enrich,
     )

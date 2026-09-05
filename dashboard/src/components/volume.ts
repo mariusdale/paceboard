@@ -1,13 +1,11 @@
 /** Weekly volume bars, with zero-weeks filled so the axis stays continuous. */
 import type { VolumeBucket } from "../lib/api";
 import { dayLabel, sportLabel } from "../lib/format";
-import type { Palette, SeriesSpec } from "./Charts";
+import { CHART, type SeriesSpec } from "./Charts";
 
-export function buildWeeklyVolume(
-  buckets: VolumeBucket[],
-  palette: Palette,
-): { data: Record<string, any>[]; series: SeriesSpec[] } {
-  const PALETTE = [palette.primary, palette.secondary, palette.quaternary, palette.tertiary, palette.quinary, palette.secondaryFill];
+const PALETTE = [CHART.teal, CHART.amber, CHART.violet, CHART.green, CHART.rose, CHART.grey];
+
+export function buildWeeklyVolume(buckets: VolumeBucket[]): { data: Record<string, any>[]; series: SeriesSpec[] } {
   if (!buckets.length) return { data: [], series: [] };
   const sports = Array.from(new Set(buckets.map((b) => b.sport))).sort();
   const weeks = Array.from(new Set(buckets.map((b) => b.week_start))).sort();

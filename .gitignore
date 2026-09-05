@@ -17,8 +17,6 @@ build/
 .DS_Store
 .claude.md
 .mcp.json
-docs/*
-.gitignore
 playground/*
 scratch/*
 tests/fixtures/captured/*
@@ -36,3 +34,16 @@ dashboard/node_modules/
 dashboard/tsconfig.tsbuildinfo
 dashboard/playwright-report/
 dashboard/test-results/
+
+# Private exports, credentials and local configuration
+.env.*
+!.env.example
+*.sqlite*
+*.db
+*.fit
+*.tcx
+*.gpx
+*token*.json
+*.pem
+backups/
+exports/

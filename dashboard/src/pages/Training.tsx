@@ -7,12 +7,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type LoadSeries, type Metric, type RollingTotal, type VolumeBucket, type ZoneTotals } from "../lib/api";
 import { useUnits } from "../lib/hooks";
 import { dayLabel, distance, duration, elevation, hours, percent, round } from "../lib/format";
-import { ChartFrame, StackedBars, TimeChart, useChartPalette, type SeriesSpec } from "../components/Charts";
+import { CHART, ChartFrame, StackedBars, TimeChart, type SeriesSpec } from "../components/Charts";
 import { buildWeeklyVolume } from "../components/volume";
 import { Empty, Failed, Loading, Unavailable } from "../components/States";
 import { Readout, ReadoutRail } from "../components/Readout";
 import { SourceBadge } from "../components/SourceBadge";
-import { usePrefs, jargonLabel } from "../lib/prefs";
 
 const WINDOWS = [
   { days: 42, label: "6 weeks" },
@@ -33,8 +32,6 @@ interface RecordRow {
 
 export function Training() {
   const units = useUnits();
-  const palette = useChartPalette();
-  const { jargon } = usePrefs();
   const [days, setDays] = useState(90);
 
   const load = useQuery({ queryKey: ["load", days], queryFn: () => api.get<LoadSeries>("/training/load", { days }) });
@@ -61,7 +58,7 @@ export function Training() {
   }));
 
   const hasGarminLoad = series.garmin_chronic.some((v) => v !== null);
-  const volumeChart = buildWeeklyVolume(volume.data ?? [], palette);
+  const volumeChart = buildWeeklyVolume(volume.data ?? []);
   const distribution = zones.data?.distribution;
 
   return (
@@ -79,10 +76,10 @@ export function Training() {
           </div>
         </div>
         <ReadoutRail>
-          <Readout label={jargonLabel("Base", "CTL", jargon)} value={round(series.ctl.at(-1), 1)} unit="au" note="42-day load average" />
-          <Readout label={jargonLabel("Recent load", "ATL", jargon)} value={round(series.atl.at(-1), 1)} unit="au" note="7-day load average" />
+          <Readout label="Fitness (CTL)" value={round(series.ctl.at(-1), 1)} unit="au" note="42-day load average" />
+          <Readout label="Fatigue (ATL)" value={round(series.atl.at(-1), 1)} unit="au" note="7-day load average" />
           <Readout
-            label={jargonLabel("Freshness", "TSB", jargon)}
+            label="Form (TSB)"
             value={round(series.tsb.at(-1), 1)}
             unit="au"
             note={formNote(series.tsb.at(-1))}
@@ -120,10 +117,10 @@ export function Training() {
           zeroLine
           syncId="training"
           series={[
-            { key: "load", name: "Daily load", color: palette.tertiary, unit: "au", digits: 0, type: "bar" },
-            { key: "ctl", name: jargonLabel("Base", "CTL", jargon), color: palette.secondary, unit: "au", digits: 1, type: "line" },
-            { key: "atl", name: jargonLabel("Recent load", "ATL", jargon), color: palette.primary, unit: "au", digits: 1, type: "line" },
-            { key: "tsb", name: jargonLabel("Freshness", "TSB", jargon), color: palette.quinary, unit: "au", digits: 1, type: "line", dashed: true },
+            { key: "load", name: "Daily load", color: CHART.grey, unit: "au", digits: 0, type: "bar" },
+            { key: "ctl", name: "Fitness (CTL)", color: CHART.teal, unit: "au", digits: 1, type: "line" },
+            { key: "atl", name: "Fatigue (ATL)", color: CHART.amber, unit: "au", digits: 1, type: "line" },
+            { key: "tsb", name: "Form (TSB)", color: CHART.violet, unit: "au", digits: 1, type: "line", dashed: true },
           ]}
         />
       </ChartFrame>
@@ -139,9 +136,9 @@ export function Training() {
             height={190}
             rightAxis
             series={[
-              { key: "gAcute", name: "Acute load", color: palette.primary, unit: "", digits: 0, type: "line" },
-              { key: "gChronic", name: "Chronic load", color: palette.secondary, unit: "", digits: 0, type: "line" },
-              { key: "gAcwr", name: "Acute:chronic", color: palette.quinary, unit: "ratio", digits: 2, type: "line", axis: "right", dashed: true },
+              { key: "gAcute", name: "Acute load", color: CHART.amber, unit: "", digits: 0, type: "line" },
+              { key: "gChronic", name: "Chronic load", color: CHART.teal, unit: "", digits: 0, type: "line" },
+              { key: "gAcwr", name: "Acute:chronic", color: CHART.violet, unit: "ratio", digits: 2, type: "line", axis: "right", dashed: true },
             ]}
           />
         </ChartFrame>
@@ -259,24 +256,23 @@ export function Training() {
   );
 }
 
-const METRIC_LABELS: Record<string, { label: string; digits: number }> = {
-  vo2max: { label: "VO₂ max", digits: 1 },
-  "vo2max:running": { label: "VO₂ max (run)", digits: 1 },
-  "vo2max:cycling": { label: "VO₂ max (ride)", digits: 1 },
-  "ftp:ride": { label: "FTP", digits: 0 },
-  lactate_threshold_hr: { label: "Lactate threshold HR", digits: 0 },
-  lactate_threshold_speed: { label: "Lactate threshold speed", digits: 2 },
-  endurance_score: { label: "Endurance score", digits: 0 },
-  hill_score: { label: "Hill score", digits: 0 },
-  "running_tolerance:run": { label: "Running tolerance", digits: 0 },
-  heat_acclimation: { label: "Heat acclimation", digits: 0 },
-  altitude_acclimation: { label: "Altitude acclimation", digits: 0 },
-  fitness_age: { label: "Fitness age", digits: 1 },
+const METRIC_LABELS: Record<string, { label: string; color: string; digits: number }> = {
+  vo2max: { label: "VO₂ max", color: CHART.teal, digits: 1 },
+  "vo2max:running": { label: "VO₂ max (run)", color: CHART.teal, digits: 1 },
+  "vo2max:cycling": { label: "VO₂ max (ride)", color: CHART.amber, digits: 1 },
+  "ftp:ride": { label: "FTP", color: CHART.amber, digits: 0 },
+  lactate_threshold_hr: { label: "Lactate threshold HR", color: CHART.rose, digits: 0 },
+  lactate_threshold_speed: { label: "Lactate threshold speed", color: CHART.violet, digits: 2 },
+  endurance_score: { label: "Endurance score", color: CHART.green, digits: 0 },
+  hill_score: { label: "Hill score", color: CHART.violet, digits: 0 },
+  "running_tolerance:run": { label: "Running tolerance", color: CHART.teal, digits: 0 },
+  heat_acclimation: { label: "Heat acclimation", color: CHART.rose, digits: 0 },
+  altitude_acclimation: { label: "Altitude acclimation", color: CHART.grey, digits: 0 },
+  fitness_age: { label: "Fitness age", color: CHART.grey, digits: 1 },
 };
 
 function PerformancePanel({ perf, loading }: { perf?: PerformanceResponse; loading: boolean }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const palette = useChartPalette();
   if (loading) return <section className="panel"><Loading rows={4} /></section>;
   if (!perf?.available) {
     return (
@@ -300,7 +296,7 @@ function PerformancePanel({ perf, loading }: { perf?: PerformanceResponse; loadi
 
   const meta = METRIC_LABELS[active];
   const rows = perf.metrics[active].map((point) => ({ x: dayLabel(point.day) ?? point.day, v: point.value }));
-  const spec: SeriesSpec[] = [{ key: "v", name: meta.label, color: palette.primary, digits: meta.digits, type: "line" }];
+  const spec: SeriesSpec[] = [{ key: "v", name: meta.label, color: meta.color, digits: meta.digits, type: "line" }];
   const predictions = Object.keys(perf.metrics).filter((k) => k.startsWith("race_prediction_"));
 
   return (
