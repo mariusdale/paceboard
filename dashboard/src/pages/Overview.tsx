@@ -21,6 +21,10 @@ export function Overview() {
   if (query.isError) return <section className="panel"><Failed error={query.error} retry={query.refetch} /></section>;
   const data = query.data!;
   const today = data.today;
+  const latest = (key: string) => data.latest_observations?.[key];
+  const rhr = latest("resting_hr");
+  const battery = latest("body_battery_high");
+  const readiness = latest("training_readiness");
   const night = data.last_night;
   const weekly = data.rolling.find(r => r.days === 7);
   const volume = buildWeeklyVolume(data.weekly_volume);
@@ -75,9 +79,9 @@ export function Overview() {
     </div>
     <div className="vital-grid">
       <Vital label="Overnight HRV" value={round(hrv, 0)} unit="ms" color="#6ce4bf" symbol="⌁" note={deviation == null ? "No baseline yet" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(1)}% vs your 7-night baseline`} values={recovery?.hrv_ms} />
-      <Vital label="Resting heart rate" value={today.resting_hr} unit="bpm" color="#ee91a5" symbol="♡" note={today.resting_hr == null ? "Not reported for this day" : `30-day average ${round(data.baselines.resting_hr, 0) ?? "—"} bpm`} values={recovery?.resting_hr} />
-      <Vital label="Body Battery" value={today.body_battery_high} unit="/ 100" color="#efbf75" symbol="ϟ" note={today.body_battery_high == null ? "Not reported for this day" : `Daily high · low ${today.body_battery_low ?? "—"}`} values={recovery?.body_battery_high} />
-      <Vital label="Training readiness" value={today.training_readiness} unit="/ 100" color="#a5a2ff" symbol="◎" note={today.readiness_level ?? "Not reported for this day"} values={recovery?.training_readiness} />
+      <Vital label="Resting heart rate" value={rhr?.value ?? today.resting_hr} unit="bpm" color="#ee91a5" symbol="♡" note={rhr ? `Latest measurement · ${rhr.day}` : "No recent resting heart rate"} values={recovery?.resting_hr} />
+      <Vital label="Body Battery" value={battery?.value ?? today.body_battery_high} unit="/ 100" color="#efbf75" symbol="ϟ" note={battery ? `Daily high · ${battery.day}` : "No recent Body Battery measurement"} values={recovery?.body_battery_high} />
+      {(readiness || today.training_readiness != null) && <Vital label="Training readiness" value={readiness?.value ?? today.training_readiness} unit="/ 100" color="#a5a2ff" symbol="◎" note={readiness ? `Latest measurement · ${readiness.day}` : today.readiness_level} values={recovery?.training_readiness} />}
     </div>
     <div className="overview-lower">
       <section className="panel trend-panel">
@@ -94,6 +98,7 @@ export function Overview() {
       <ChartFrame title="Weekly volume by sport" note="Moving time where available, otherwise elapsed time.">{volume.data.length ? <StackedBars data={volume.data} series={volume.series} height={200} /> : <Empty title="No weekly activities yet" detail="Sync your accounts to see your training volume." />}</ChartFrame>
       <section className="panel"><div className="panel-head"><h2>Your longer view</h2></div><div className="panel-body stack">{data.rolling.filter(r => r.days !== 7).map(r => <div key={r.days}><span className="label">Last {r.days} days · {r.count} activities</span><dl className="kv"><dt>Distance</dt><dd>{distance(r.distance_m, units)}</dd><dt>Time</dt><dd>{hours(r.duration_s)}</dd><dt>Ascent</dt><dd>{elevation(r.elevation_m, units)}</dd></dl></div>)}<div><span className="label">Consistency · {data.consistency.window_days} days</span><dl className="kv"><dt>Active days</dt><dd>{data.consistency.active_days}</dd><dt>Current streak</dt><dd>{data.consistency.current_streak} days</dd><dt>Longest streak</dt><dd>{data.consistency.longest_streak} days</dd></dl></div></div></section>
     </div>
+    {!readiness && today.training_readiness == null && <details className="panel"><summary className="panel-body small">About training readiness</summary><p className="panel-body small muted">Garmin has not supplied a training readiness score for this day. Availability depends on your device and Garmin data; sleep and HRV remain available independently. Check Connections if other metrics are missing too.</p></details>}
     <div className="daily-footer"><span>Daily metrics: {today.day ?? "awaiting data"} · Sleep: {night.day ?? "awaiting data"}</span><span>{integer(today.steps) ?? "—"} steps · {integer(today.avg_stress) ?? "—"} average stress</span><Link to="/settings">Manage your connections ↗</Link></div>
   </>;
 }

@@ -142,9 +142,14 @@ export function ActivityDetail() {
     );
 
   const a = activity.data!;
+  const lapHas = (key: keyof Lap) => laps.data?.some(lap => lap[key] != null);
   const chartData = buildChartData(streams.data, units, a.sport);
   const showMaps = settings.data?.show_maps ?? false;
   const hasRoute = streams.data?.available && streams.data.channels.lat;
+  const availableMetrics = Object.entries(analysis.data?.metrics ?? {}).filter(([key, metric]) => ["trimp", "aerobic_decoupling", "normalized_power", "intensity_factor", "training_stress_score", "watts_per_kg"].includes(key) && metric.available && metric.value != null);
+  const metricNames: Record<string, string> = { trimp: "Training impulse", aerobic_decoupling: "Cardiac drift", normalized_power: "Normalized power", intensity_factor: "Intensity factor", training_stress_score: "Training stress score", watts_per_kg: "Watts / kg" };
+  const missing = Object.entries(analysis.data?.metrics ?? {}).filter(([, metric]) => !metric.available);
+
 
   return (
     <>
@@ -230,9 +235,11 @@ export function ActivityDetail() {
         </div>
       </section>
 
+      {[streams, laps, zones, splits, analysis].filter(q => q.isError).map((q, i) => <section className="panel" key={i}><Failed error={q.error} retry={q.refetch} /></section>)}
+      <p className="small muted">Showing measurements recorded for this activity. Details depend on the device, sport and connected provider.</p>
       <div className="grid g-2-1">
         <div className="stack">
-          <section className="panel">
+          {(streams.isLoading || chartData.charts.length > 0) && <section className="panel">
             <div className="panel-head">
               <h2>Session charts</h2>
               <span className="spacer" />
@@ -283,9 +290,9 @@ export function ActivityDetail() {
                 ))}
               </div>
             )}
-          </section>
+          </section>}
 
-          <section className="panel">
+          {(laps.isLoading || !!laps.data?.length) && <section className="panel">
             <div className="panel-head">
               <h2>Laps</h2>
               <span className="spacer" />
@@ -316,11 +323,11 @@ export function ActivityDetail() {
                           ? `Pace ${paceLabel(units)}`
                           : speedLabel(units)}
                       </th>
-                      <th className="n">Avg HR</th>
-                      <th className="n">Max HR</th>
-                      <th className="n">Power</th>
-                      <th className="n">Ascent</th>
-                      <th>Type</th>
+                      {lapHas("avg_hr") && <th className="n">Avg HR</th>}
+                      {lapHas("max_hr") && <th className="n">Max HR</th>}
+                      {lapHas("avg_power_w") && <th className="n">Power</th>}
+                      {lapHas("elevation_gain_m") && <th className="n">Ascent</th>}
+                      {lapHas("intensity_type") && <th>Type</th>}
                       <th>Source</th>
                     </tr>
                   </thead>
@@ -340,17 +347,17 @@ export function ActivityDetail() {
                             ? (pace(lap.avg_speed_mps, units) ?? "—")
                             : (speed(lap.avg_speed_mps, units) ?? "—")}
                         </td>
-                        <td className="n">{round(lap.avg_hr, 0) ?? "—"}</td>
-                        <td className="n">{round(lap.max_hr, 0) ?? "—"}</td>
-                        <td className="n">
+                        {lapHas("avg_hr") && <td className="n">{round(lap.avg_hr, 0) ?? "—"}</td>}
+                        {lapHas("max_hr") && <td className="n">{round(lap.max_hr, 0) ?? "—"}</td>}
+                        {lapHas("avg_power_w") && <td className="n">
                           {round(lap.avg_power_w, 0) ?? "—"}
-                        </td>
-                        <td className="n">
+                        </td>}
+                        {lapHas("elevation_gain_m") && <td className="n">
                           {elevation(lap.elevation_gain_m, units) ?? "—"}
-                        </td>
-                        <td className="small muted">
+                        </td>}
+                        {lapHas("intensity_type") && <td className="small muted">
                           {lap.intensity_type ?? "—"}
-                        </td>
+                        </td>}
                         <td>
                           <SourceBadge source={lap.source} />
                         </td>
@@ -381,7 +388,7 @@ export function ActivityDetail() {
                 </div>
               </div>
             )}
-          </section>
+          </section>}
         </div>
         <div className="stack">
           {showMaps && hasRoute ? (
@@ -439,67 +446,8 @@ export function ActivityDetail() {
             </section>
           ) : null}
 
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Derived analysis</h2>
-            </div>
-            <div className="panel-body">
-              {analysis.isLoading ? (
-                <Loading rows={4} />
-              ) : (
-                <dl className="kv">
-                  <dt>TRIMP</dt>
-                  <dd>
-                    <MetricValue metric={analysis.data?.metrics.trimp} />
-                  </dd>
-                  <dt>Cardiac drift</dt>
-                  <dd>
-                    <MetricValue
-                      metric={analysis.data?.metrics.aerobic_decoupling}
-                      digits={2}
-                    />
-                  </dd>
-                  <dt>Normalized power</dt>
-                  <dd>
-                    <MetricValue
-                      metric={analysis.data?.metrics.normalized_power}
-                      digits={0}
-                    />
-                  </dd>
-                  <dt>Intensity factor</dt>
-                  <dd>
-                    <MetricValue
-                      metric={analysis.data?.metrics.intensity_factor}
-                      digits={2}
-                    />
-                  </dd>
-                  <dt>TSS</dt>
-                  <dd>
-                    <MetricValue
-                      metric={analysis.data?.metrics.training_stress_score}
-                      digits={0}
-                    />
-                  </dd>
-                  <dt>Watts / kg</dt>
-                  <dd>
-                    <MetricValue
-                      metric={analysis.data?.metrics.watts_per_kg}
-                      digits={2}
-                    />
-                  </dd>
-                </dl>
-              )}
-              <p
-                className="small faint"
-                style={{ marginTop: 10, marginBottom: 0 }}
-              >
-                Formula version{" "}
-                {analysis.data?.metrics.trimp?.formula_version ?? "1"}. Metrics
-                that need data this activity does not carry are shown as
-                unavailable rather than estimated.
-              </p>
-            </div>
-          </section>
+          {availableMetrics.length > 0 && <section className="panel"><div className="panel-head"><h2>Derived analysis</h2></div><div className="panel-body"><dl className="kv">{availableMetrics.map(([key, metric]) => <div key={key} style={{ display: "contents" }}><dt>{metricNames[key] ?? key.replace(/_/g, " ")}</dt><dd><MetricValue metric={metric} /></dd></div>)}</dl></div></section>}
+
 
           <BestEfforts
             metric={analysis.data?.metrics.best_efforts}
@@ -515,6 +463,7 @@ export function ActivityDetail() {
         </div>
       </div>
 
+          {missing.length > 0 && <details className="panel"><summary className="panel-body">About data coverage</summary><div className="panel-body small muted">{missing.map(([key, metric]) => <p key={key}>{metricNames[key] ?? key.replace(/_/g, " ")}: {metric.unavailable_reason}</p>)}</div></details>}
       <SourceComparison analysis={analysis.data} />
     </>
   );
@@ -531,6 +480,7 @@ function Metric2({
   unit?: string;
   note?: string;
 }) {
+  if (value == null) return null;
   return (
     <div className="readout">
       <span className="label">{label}</span>
@@ -729,6 +679,7 @@ function BestEfforts({
   const points = metric?.detail?.points as Record<string, number> | undefined;
   // "2:08/km" is a strange thing to read about a bike ride.
   const asPace = isPaceSport(sport);
+  if (!points || !Object.keys(points).length) return null;
   return (
     <section className="panel">
       <div className="panel-head">
@@ -782,6 +733,7 @@ function ZonePanel({
 }) {
   const hr = zones?.zones.filter((z) => z.kind === "hr" && z.seconds) ?? [];
   const total = hr.reduce((sum, z) => sum + (z.seconds ?? 0), 0);
+  if (!loading && !hr.length) return null;
   return (
     <section className="panel">
       <div className="panel-head">
@@ -880,6 +832,7 @@ function SegmentsPanel({
     segmentType(split).toLowerCase().includes("climb"),
   );
 
+  if (!loading && !typed.length) return null;
   return (
     <section className="panel">
       <div className="panel-head">

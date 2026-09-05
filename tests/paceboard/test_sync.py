@@ -420,3 +420,13 @@ class TestUnconfiguredProvider:
         )
         with db.session_scope() as session:
             assert session.get(SyncRun, run_id).status == "success"
+
+
+async def test_backfill_retries_previously_unavailable_activity_detail(orchestrator, db, fake_client):
+    await orchestrator.run(request_for(mode="backfill"))
+    with db.session_scope() as session:
+        for row in session.execute(select(ActivitySourceRecord)).scalars():
+            row.detail_status = 'unavailable'
+    fake_client.calls.clear()
+    await orchestrator.run(request_for(mode="backfill"))
+    assert sum(name == 'get_activity' for name, _ in fake_client.calls) == 2

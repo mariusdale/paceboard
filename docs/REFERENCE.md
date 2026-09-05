@@ -670,7 +670,7 @@ Paceboard is MIT licensed. It is built on top of
 [**Taxuspt/garmin_mcp**](https://github.com/Taxuspt/garmin_mcp) by Alexandre
 Domingues and its contributors — also MIT — which provides the Garmin Connect MCP
 server in `src/garmin_mcp/` that Paceboard reads all Garmin data through. That
-work is unmodified here; Paceboard treats it as the provider boundary and adds
+work provides the provider boundary; Paceboard also preserves UTC timestamps in activity summaries and adds
 the ingestion pipeline, database, analytics, REST API and dashboard around it.
 
 If you find a bug in Garmin tool coverage or in a Garmin response shape, it very

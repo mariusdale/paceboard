@@ -40,7 +40,16 @@ def overview(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
         select(SyncRun).order_by(SyncRun.started_at.desc()).limit(1)
     ).scalar_one_or_none()
 
+    observations = {}
+    for name in ("resting_hr", "body_battery_high", "training_readiness"):
+        column = getattr(DailyHealth, name)
+        latest = session.execute(select(DailyHealth).where(
+            DailyHealth.day <= today, DailyHealth.day >= today - timedelta(days=30), column.is_not(None)
+        ).order_by(DailyHealth.day.desc()).limit(1)).scalar_one_or_none()
+        observations[name] = {"value": getattr(latest, name), "day": latest.day.isoformat()} if latest else None
+
     return {
+        "latest_observations": observations,
         "generated_at": datetime.utcnow().isoformat(),
         "timezone": settings.timezone,
         "unit_system": settings.unit_system,
@@ -50,7 +59,7 @@ def overview(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
             "steps": latest_health.steps if latest_health else None,
             "step_goal": latest_health.step_goal if latest_health else None,
             "resting_hr": latest_health.resting_hr if latest_health else None,
-            "avg_stress": latest_health.avg_stress if latest_health else None,
+            "avg_stress": latest_health.avg_stress if latest_health and latest_health.avg_stress is not None and latest_health.avg_stress >= 0 else None,
             "body_battery_high": latest_health.body_battery_high if latest_health else None,
             "body_battery_low": latest_health.body_battery_low if latest_health else None,
             "training_readiness": latest_health.training_readiness if latest_health else None,

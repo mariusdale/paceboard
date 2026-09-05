@@ -534,3 +534,23 @@ class TestBackfillWindow:
     ])
     def test_invalid_window_is_rejected(self, client, body):
         assert client.post('/api/v1/sync', json=body).status_code == 422
+
+
+class TestRecoveryHistory:
+    def test_historical_summary_does_not_include_future_bedtimes(self, client, db):
+        with db.session_scope() as session:
+            session.add(SleepRecord(source='garmin', day=date(2020, 1, 30), sleep_start_utc=datetime(2020, 1, 29, 23)))
+            session.add(SleepRecord(source='garmin', day=date(2026, 1, 30), sleep_start_utc=datetime(2026, 1, 30, 5)))
+        body = client.get('/api/v1/health/recovery/summary', params={'end': '2020-01-31'}).json()
+        assert body['range']['end'] == '2020-01-31'
+        assert body['sleep_consistency_14d']['available'] is False
+
+    def test_overview_latest_measurements_have_their_actual_dates(self, client, db):
+        yesterday = date.today() - timedelta(days=1)
+        with db.session_scope() as session:
+            session.add(DailyHealth(source='garmin', day=yesterday, resting_hr=49, body_battery_high=90))
+            session.add(DailyHealth(source='garmin', day=date.today(), steps=10))
+        body = client.get('/api/v1/overview').json()
+        assert body['today']['resting_hr'] is None
+        assert body['latest_observations']['resting_hr'] == {'value': 49, 'day': yesterday.isoformat()}
+        assert body['latest_observations']['training_readiness'] is None

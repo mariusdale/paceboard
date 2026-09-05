@@ -257,3 +257,8 @@ class TestHandlerCoverage:
         }
         registered = set(norm.handler_names())
         assert needed <= registered, f"missing handlers: {sorted(needed - registered)}"
+
+
+def test_zero_readiness_is_a_real_score(session):
+    norm.training_readiness(session, result('get_training_readiness', [{'date': '2026-08-20', 'score': 0, 'level': 'POOR'}]), None)
+    assert session.execute(select(DailyHealth)).scalar_one().training_readiness == 0

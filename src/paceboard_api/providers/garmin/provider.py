@@ -288,7 +288,7 @@ class GarminMcpProvider:
 
     def _summary_from_list_item(self, item: dict[str, Any]) -> Optional[ActivitySummaryDTO]:
         provider_id = item.get("id")
-        start = _parse_dt(item.get("start_time") or item.get("start_time_gmt"))
+        start = _parse_dt(item.get("start_time_gmt") or item.get("start_time"))
         if provider_id is None or start is None:
             return None
         provider_type = item.get("type")

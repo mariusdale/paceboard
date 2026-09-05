@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from datetime import date
 
 from fastapi import APIRouter, Query
 from sqlalchemy import select
@@ -111,12 +112,13 @@ def recovery(session: SessionDep, window: DateRangeDep) -> dict[str, Any]:
 
 
 @router.get("/recovery/summary", response_model=dict, summary="Recovery headline metrics")
-def recovery_summary(session: SessionDep) -> dict[str, Any]:
-    return analytics.recovery_summary(session)
+def recovery_summary(session: SessionDep, end: Optional[date] = Query(None)) -> dict[str, Any]:
+    return analytics.recovery_summary(session, end=end)
 
 
 @router.get("/correlations", response_model=list[dict],
             summary="Recovery vs load correlations")
 def correlations(session: SessionDep,
-                 days: int = Query(90, ge=14, le=730)) -> list[dict[str, Any]]:
-    return analytics.correlations(session, window_days=days)
+                 days: int = Query(90, ge=14, le=1100),
+                 end: Optional[date] = Query(None)) -> list[dict[str, Any]]:
+    return analytics.correlations(session, end=end, window_days=days)

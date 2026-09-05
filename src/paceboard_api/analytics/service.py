@@ -569,7 +569,7 @@ def recovery_summary(session: Session, end: Optional[date] = None) -> dict[str, 
 
     bed_times: list[Optional[float]] = []
     for row in session.execute(
-        select(SleepRecord).where(SleepRecord.day >= end - timedelta(days=13))
+        select(SleepRecord).where(SleepRecord.day >= end - timedelta(days=13), SleepRecord.day <= end)
     ).scalars():
         if row.sleep_start_utc:
             seconds = (

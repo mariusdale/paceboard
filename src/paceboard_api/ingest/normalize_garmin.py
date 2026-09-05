@@ -110,6 +110,11 @@ def _int(value: Any) -> Optional[int]:
     return int(number) if number is not None else None
 
 
+def _score(value: Any) -> Optional[int]:
+    number = _int(value)
+    return number if number is not None and 0 <= number <= 100 else None
+
+
 def _perf(
     session: Session,
     metric: str,
@@ -159,8 +164,8 @@ def daily_stats(session: Session, result: ProviderResult, raw_id: Optional[int])
             "min_hr": _int(payload.get("min_heart_rate_bpm")),
             "max_hr": _int(payload.get("max_heart_rate_bpm")),
             "rhr_7day_avg": _int(payload.get("last_7_days_avg_resting_hr")),
-            "avg_stress": _int(payload.get("avg_stress_level")),
-            "max_stress": _int(payload.get("max_stress_level")),
+            "avg_stress": _score(payload.get("avg_stress_level")),
+            "max_stress": _score(payload.get("max_stress_level")),
             "body_battery_high": _int(payload.get("body_battery_highest")),
             "body_battery_low": _int(payload.get("body_battery_lowest")),
             "body_battery_charged": _int(payload.get("body_battery_charged")),
@@ -249,8 +254,8 @@ def stress_summary(session: Session, result: ProviderResult, raw_id: Optional[in
     upsert(
         session, StressRecord, {"source": SOURCE, "day": day},
         {
-            "avg_stress": _int(payload.get("avg_stress_level")),
-            "max_stress": _int(payload.get("max_stress_level")),
+            "avg_stress": _score(payload.get("avg_stress_level")),
+            "max_stress": _score(payload.get("max_stress_level")),
             "rest_pct": _num(payload.get("rest_percent")),
             "low_pct": _num(payload.get("low_stress_percent")),
             "medium_pct": _num(payload.get("medium_stress_percent")),
@@ -262,8 +267,8 @@ def stress_summary(session: Session, result: ProviderResult, raw_id: Optional[in
     upsert(
         session, DailyHealth, {"source": SOURCE, "day": day},
         {
-            "avg_stress": _int(payload.get("avg_stress_level")),
-            "max_stress": _int(payload.get("max_stress_level")),
+            "avg_stress": _score(payload.get("avg_stress_level")),
+            "max_stress": _score(payload.get("max_stress_level")),
         },
     )
     return 1
@@ -336,7 +341,7 @@ def training_readiness(session: Session, result: ProviderResult, raw_id: Optiona
         )
         if payload.get(key) is not None
     }
-    score = _int(payload.get("score") or payload.get("training_readiness_score"))
+    score = _int(payload.get("score") if payload.get("score") is not None else payload.get("training_readiness_score"))
     upsert(
         session, DailyHealth, {"source": SOURCE, "day": day},
         {

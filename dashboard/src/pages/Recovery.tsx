@@ -10,12 +10,14 @@ import { dayLabel, hours, round } from "../lib/format";
 import { CHART, ChartFrame, StackedBars, TimeChart } from "../components/Charts";
 import { Empty, Failed, Loading, Unavailable } from "../components/States";
 import { Readout, ReadoutRail } from "../components/Readout";
+import { useTimezone } from "../lib/hooks";
 import { SourceBadge } from "../components/SourceBadge";
 
 const WINDOWS = [
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
   { days: 180, label: "6 months" },
+  { days: 365, label: "1 year" },
 ];
 
 interface Correlation {
@@ -23,27 +25,57 @@ interface Correlation {
   available: boolean; unavailable_reason?: string; note?: string;
 }
 
-export function Recovery() {
-  const [days, setDays] = useState(90);
+function shiftDay(day: string, amount: number) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
 
+export function Recovery() {
+  const timezone = useTimezone();
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: timezone });
+  const [end, setEnd] = useState(today);
+  const [start, setStart] = useState(() => shiftDay(today, -89));
+  const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
+  const valid = !!start && !!end && days > 0 && days <= 1100 && end <= today;
+  const preset = (n: number) => { setStart(shiftDay(today, 1 - n)); setEnd(today); };
+  const move = (direction: number) => { const nextEnd = shiftDay(end, direction * days); const boundedEnd = nextEnd > today ? today : nextEnd; setEnd(boundedEnd); setStart(shiftDay(boundedEnd, 1 - days)); };
+  return <>
+    <section className="panel"><div className="panel-head"><h1>Recovery</h1><span className="spacer" /><SourceBadge source="garmin" /></div>
+      <div className="panel-body stack">
+        <div className="segmented" role="group" aria-label="Time window">{WINDOWS.map(w => <button key={w.days} aria-pressed={days === w.days && end === today} onClick={() => preset(w.days)}>{w.label}</button>)}</div>
+        <div className="toolbar">
+          <button disabled={!valid} onClick={() => move(-1)}>← Previous period</button>
+          <label className="field">From<input aria-label="Recovery from" type="date" value={start} onChange={e => setStart(e.target.value)} /></label>
+          <label className="field">To<input aria-label="Recovery to" type="date" max={today} value={end} onChange={e => setEnd(e.target.value)} /></label>
+          <button disabled={!valid || end >= today} onClick={() => move(1)}>Next period →</button>
+        </div>
+        <span className="small muted">{valid ? `${start} – ${end} · ${days} days. All charts use this period; headline baselines end on ${end}.` : "Choose 1–1,100 days ending no later than today."}</span>
+      </div>
+    </section>
+    {valid && <RecoveryContent days={days} start={start} end={end} />}
+  </>;
+}
+
+function RecoveryContent({ days, start, end }: { days: number; start: string; end: string }) {
   const series = useQuery({
-    queryKey: ["recovery", days],
-    queryFn: () => api.get<RecoverySeries>("/health/recovery", { days }),
+    queryKey: ["recovery", start, end],
+    queryFn: () => api.get<RecoverySeries>("/health/recovery", { start, end }),
   });
   const summary = useQuery({
-    queryKey: ["recovery-summary"],
-    queryFn: () => api.get<Record<string, Metric>>("/health/recovery/summary"),
+    queryKey: ["recovery-summary", end],
+    queryFn: () => api.get<Record<string, Metric>>("/health/recovery/summary", { end }),
   });
   const correlations = useQuery({
-    queryKey: ["correlations", days],
-    queryFn: () => api.get<Correlation[]>("/health/correlations", { days: Math.max(14, days) }),
+    queryKey: ["correlations", start, end],
+    queryFn: () => api.get<Correlation[]>("/health/correlations", { days: Math.max(14, days), end }),
   });
 
   if (series.isLoading) return <section className="panel"><Loading label="Loading recovery data" rows={6} /></section>;
   if (series.isError) return <section className="panel"><Failed error={series.error} retry={series.refetch} /></section>;
 
   const data = series.data!;
-  const hasAny = data.sleep_seconds.some((v) => v !== null) || data.hrv_ms.some((v) => v !== null);
+  const hasAny = [data.sleep_seconds, data.hrv_ms, data.resting_hr, data.body_battery_high, data.training_readiness].some(values => values.some(v => v !== null));
 
   const rows = data.days.map((day, i) => ({
     x: dayLabel(day) ?? day,
@@ -81,21 +113,10 @@ export function Recovery() {
   return (
     <>
       <section className="panel">
-        <div className="panel-head">
-          <h1>Recovery</h1>
-          <span className="spacer" />
-          <SourceBadge source="garmin" />
-          <div className="segmented" role="group" aria-label="Time window">
-            {WINDOWS.map((w) => (
-              <button key={w.days} aria-pressed={days === w.days} onClick={() => setDays(w.days)}>
-                {w.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <div className="panel-head"><h2>Recovery at the end of this period</h2></div>
         <ReadoutRail>
           <Readout
-            label="HRV last night"
+            label="Latest HRV before period end"
             value={summary.data?.hrv_latest?.value != null ? String(Math.round(summary.data.hrv_latest.value)) : null}
             unit="ms"
             raw={summary.data?.hrv_latest?.value ?? null}
@@ -256,11 +277,11 @@ export function Recovery() {
 }
 
 function SleepTable({ rows }: { rows: Record<string, any>[] }) {
-  const recent = rows.slice(-14).reverse();
+  const recent = rows.filter(row => row.sleepHours != null).slice(-14).reverse();
   if (!recent.length) return <Unavailable reason="No nights in this window." />;
   return (
     <section className="panel">
-      <div className="panel-head"><h2>Last 14 nights</h2></div>
+      <div className="panel-head"><h2>Latest 14 nights in selected period</h2></div>
       <div className="table-wrap">
         <table>
           <thead>

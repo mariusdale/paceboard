@@ -268,7 +268,7 @@ class SyncOrchestrator:
 
             if request.enrich and "activities" in request.categories and not self._cancelled(run_id):
                 self._step(run_id, f"{provider_name}: activity details")
-                reports.append(await self._enrich_activities(run_id, provider_name, provider))
+                reports.append(await self._enrich_activities(run_id, provider_name, provider, retry_unavailable=request.mode == "backfill"))
         finally:
             self._set_watermark(provider_name, "sync", end)
 
@@ -369,7 +369,7 @@ class SyncOrchestrator:
         return report
 
     async def _enrich_activities(
-        self, run_id: int, provider_name: str, provider
+        self, run_id: int, provider_name: str, provider, *, retry_unavailable: bool = False
     ) -> TaskReport:
         """Fetch detail/laps/zones then streams for records that still need them."""
         report = TaskReport(name="activity_detail", provider=provider_name)
@@ -380,7 +380,7 @@ class SyncOrchestrator:
                     select(ActivitySourceRecord.provider_id)
                     .where(
                         ActivitySourceRecord.source == provider_name,
-                        ActivitySourceRecord.detail_status.in_(("pending", "retry")),
+                        ActivitySourceRecord.detail_status.in_(("pending", "retry", "unavailable") if retry_unavailable else ("pending", "retry")),
                     )
                     .order_by(ActivitySourceRecord.start_time_utc.desc())
                     .limit(DETAIL_BATCH)
@@ -411,7 +411,7 @@ class SyncOrchestrator:
                     .where(
                         ActivitySourceRecord.source == provider_name,
                         ActivitySourceRecord.detail_status == "complete",
-                        Activity.stream_status.in_(("pending", "retry")),
+                        Activity.stream_status.in_(("pending", "retry", "unavailable") if retry_unavailable else ("pending", "retry")),
                     )
                     .order_by(ActivitySourceRecord.start_time_utc.desc())
                     .limit(STREAM_BATCH)
@@ -466,7 +466,8 @@ class SyncOrchestrator:
             row = requested
             if detail is not None:
                 row = act.upsert_source_record(session, detail)
-            act.ensure_canonical(session, row)
+            # Details can correct the summary's timestamp; re-match using that evidence.
+            link_source_record(session, row, self.settings)
             act.replace_laps(session, row, laps)
             act.replace_zones(session, row, zones)
             for result in extra_results:

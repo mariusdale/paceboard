@@ -238,6 +238,7 @@ export interface StreamSet {
 }
 
 export interface Overview {
+  latest_observations?: Record<string, { value: number; day: string } | null>;
   generated_at: string;
   timezone: string;
   unit_system: string;

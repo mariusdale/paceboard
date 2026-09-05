@@ -65,7 +65,8 @@ test.describe("Paceboard dashboard", () => {
     await expect(page.getByRole("heading", { name: "Derived analysis" })).toBeVisible();
 
     // A metric with no source data says so rather than showing a number.
-    await expect(page.locator(".na-inline").first()).toContainText("Unavailable");
+    await expect(page.locator(".readout-value.na")).toHaveCount(0);
+    await expect(page.getByText("About data coverage", { exact: true })).toBeVisible();
 
     // --- Recovery
     await goto(page, "Recovery");
@@ -167,6 +168,39 @@ test.describe("Paceboard dashboard", () => {
     await expect(page.getByRole("button", { name: "Backfill custom days" })).toBeDisabled();
     await page.getByLabel("Custom backfill days").fill("3651");
     await expect(page.getByRole("button", { name: "Backfill custom days" })).toBeDisabled();
+  });
+
+  test("recovery can navigate a full year and an empty historical period", async ({ page }) => {
+    await page.goto("/recovery");
+    await page.getByRole("button", { name: "1 year", exact: true }).click();
+    await expect(page.getByRole("button", { name: "1 year", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Previous period" }).click();
+    await expect(page.getByLabel("Recovery from")).toBeVisible();
+    await page.getByLabel("Recovery from").fill("2020-01-01");
+    await page.getByLabel("Recovery to").fill("2020-01-31");
+    await expect(page.getByText("No recovery data stored", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "30 days", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Sleep stages" })).toBeVisible();
+  });
+
+  test("sparse activities show recorded metrics without empty feature panels", async ({ page }) => {
+    await page.route("**/api/v1/activities/999**", async route => {
+      const path = new URL(route.request().url()).pathname;
+      const data = path.endsWith("/999") ? { id: 999, name: "Simple walk", sport: "walk", sources: [], distance_m: 2000, duration_s: 1800, has_gps: false, field_provenance: {} }
+        : path.endsWith("/analysis") ? { metrics: { trimp: { available: false, unavailable_reason: "Heart rate was not recorded" } }, source_comparison: { available: false, fields: [] } }
+        : path.endsWith("/streams") ? { available: false, channels: {}, point_count: 0 }
+        : path.endsWith("/zones") ? { available: false, zones: [] } : [];
+      await route.fulfill({ json: data });
+    });
+    await page.goto("/activities/999");
+    await expect(page.getByRole("heading", { name: "Simple walk" })).toBeVisible();
+    await expect(page.locator(".readout")).toHaveCount(2);
+    await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(0);
+    for (const title of ["Session charts", "Laps", "Derived analysis", "Best efforts", "Time in heart-rate zones"]) {
+      await expect(page.getByRole("heading", { name: title, exact: true })).toHaveCount(0);
+    }
+    await page.getByText("About data coverage", { exact: true }).click();
+    await expect(page.getByText(/Heart rate was not recorded/)).toBeVisible();
   });
 
   test("the dashboard is usable at a mobile viewport", async ({ page }) => {

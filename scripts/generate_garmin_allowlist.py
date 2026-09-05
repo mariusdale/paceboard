@@ -70,7 +70,7 @@ def build() -> str:
     for name in names:
         piece = name if not current else f"{current},{name}"
         if len(piece) > 78:
-            lines.append(current)
+            lines.append(current + ",")
             current = name
         else:
             current = piece

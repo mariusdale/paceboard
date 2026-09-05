@@ -119,3 +119,11 @@ class TestExtractText:
 
     def test_accepts_dict_shaped_content(self):
         assert extract_text([{"type": "text", "text": "hi"}]) == "hi"
+
+
+def test_activity_summary_prefers_explicit_utc_timestamp():
+    from paceboard_api.providers.garmin.provider import GarminMcpProvider
+    from unittest.mock import Mock
+    provider = GarminMcpProvider(Mock())
+    row = provider._summary_from_list_item({'id': 1, 'type': 'running', 'start_time': '2026-09-04 15:06:38', 'start_time_gmt': '2026-09-04 13:06:38'})
+    assert row.start_time_utc.hour == 13
