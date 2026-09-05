@@ -26,13 +26,13 @@ export PACEBOARD_LOG_LEVEL=WARNING
 # Point the Garmin MCP URL at a closed port: the suite must never reach a real
 # provider, and the UI's disconnected state is itself under test.
 export GARMIN_MCP_URL="http://127.0.0.1:59999/mcp"
-unset STRAVA_CLIENT_ID STRAVA_CLIENT_SECRET 2>/dev/null || true
+export STRAVA_CLIENT_ID="" STRAVA_CLIENT_SECRET=""
 
 uv run --extra paceboard paceboard-api seed-fixtures --days 90 >/dev/null
 
 cleanup() {
   trap - INT TERM EXIT
-  kill "${API_PID:-}" 2>/dev/null || true
+  kill "${WEB_PID:-}" "${API_PID:-}" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 trap cleanup INT TERM EXIT
@@ -41,4 +41,6 @@ uv run --extra paceboard paceboard-api serve --no-migrate &
 API_PID=$!
 
 cd dashboard
-exec npx vite --host 127.0.0.1 --port "$WEB_PORT" --strictPort
+npx vite --host 127.0.0.1 --port "$WEB_PORT" --strictPort &
+WEB_PID=$!
+wait "$WEB_PID"

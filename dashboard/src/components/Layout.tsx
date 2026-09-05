@@ -1,6 +1,6 @@
 /** App shell: navigation rail, top bar with live sync state, content area. */
 import { NavLink, Outlet } from "react-router-dom";
-import { useLatestSync, useStartSync, useStatus } from "../lib/hooks";
+import { useConnections, useLatestSync, useStartSync, useStatus } from "../lib/hooks";
 import { localTime, relativeAge } from "../lib/format";
 
 const NAV = [
@@ -14,6 +14,7 @@ const NAV = [
 
 export function Layout() {
   const status = useStatus();
+  const connections = useConnections();
   const sync = useLatestSync();
   const start = useStartSync();
 
@@ -25,7 +26,7 @@ export function Layout() {
       <nav className="rail" aria-label="Sections">
         <div className="rail-brand">
           <strong>Paceboard</strong>
-          <span>Local training data</span>
+          <span>Health & performance</span>
         </div>
         <div className="rail-nav">
           {NAV.map((item) => (
@@ -36,13 +37,17 @@ export function Layout() {
           ))}
         </div>
         <div className="rail-foot small faint">
-          <div className="mono">v{status.data?.version ?? "—"}</div>
-          <div>{status.data?.bound_host ?? "127.0.0.1"} · local only</div>
+          <div>Your data. Your space.</div>
+          <div>Private · on this device</div>
         </div>
       </nav>
 
       <div className="main">
         <header className="topbar">
+          <div className="provider-pills">{["garmin", "strava"].map(provider => {
+            const connection = connections.data?.find(c => c.provider === provider);
+            return <NavLink key={provider} to="/settings" className="provider-pill"><span className={`dot ${connection?.status === "connected" ? "ok" : "idle"}`} />{provider === "garmin" ? "Garmin" : "Strava"}<span className="sr-only">: {connection?.status ?? "checking"}</span></NavLink>;
+          })}</div>
           <SyncPill />
           <span className="spacer" />
           {lastFinished && !running && (
@@ -50,6 +55,7 @@ export function Layout() {
               Last sync {localTime(lastFinished, status.data?.timezone ?? "Europe/Oslo")}
             </span>
           )}
+          {start.isError && <span className="small" role="alert">{start.error.message}</span>}
           <button
             className="primary"
             disabled={running || start.isPending}

@@ -7,13 +7,19 @@ UV ?= uv run --extra paceboard
 .PHONY: help install dev api web garmin-mcp migrate sync backfill smoke \
         test test-backend test-frontend lint typecheck build e2e check clean allowlist
 
+setup: ## Guided first-time setup
+	./scripts/setup.sh
+
+start: ## Start Garmin, API, and the built dashboard
+	./scripts/start.sh
+
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 install: ## Install Python and dashboard dependencies
 	uv sync --extra paceboard
-	cd dashboard && npm install
+	cd dashboard && npm ci
 
 dev: ## Start the API and dashboard together (loopback only)
 	./scripts/dev.sh

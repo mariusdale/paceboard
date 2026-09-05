@@ -14,9 +14,9 @@ import {
 } from "recharts";
 
 export const CHART = {
-  teal: "#12a4b0",
-  amber: "#d98219",
-  violet: "#7a68dd",
+  teal: "#77e5c0",
+  amber: "#edbe7d",
+  violet: "#aaa7ff",
   rose: "#c4405c",
   green: "#28a06a",
   grey: "#8b95a1",
@@ -122,9 +122,9 @@ export function TimeChart({
             s.type === "bar" ? (
               <Bar key={s.key} yAxisId={s.axis ?? "left"} dataKey={s.key} name={s.name} fill={s.color} radius={[2, 2, 0, 0]} isAnimationActive={false} />
             ) : s.type === "area" ? (
-              <Area key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} fill={s.color} fillOpacity={0.14} strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls />
+              <Area key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} fill={s.color} fillOpacity={0.14} strokeWidth={1.6} dot={false} isAnimationActive={false} connectNulls={false} />
             ) : (
-              <Line key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={1.6} strokeDasharray={s.dashed ? "4 3" : undefined} dot={false} isAnimationActive={false} connectNulls />
+              <Line key={s.key} yAxisId={s.axis ?? "left"} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={1.6} strokeDasharray={s.dashed ? "4 3" : undefined} dot={false} isAnimationActive={false} connectNulls={false} />
             ),
           )}
         </ComposedChart>
@@ -160,7 +160,7 @@ export function Sparkline({ values, color, height = 34 }: { values: (number | nu
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-        <Area type="monotone" dataKey="v" stroke={color} fill={color} fillOpacity={0.16} strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls />
+        <Area type="monotone" dataKey="v" stroke={color} fill={color} fillOpacity={0.16} strokeWidth={1.4} dot={false} isAnimationActive={false} connectNulls={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
