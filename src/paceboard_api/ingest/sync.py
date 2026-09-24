@@ -21,7 +21,7 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, local_today
 from ..db.models import (
     Activity,
     ActivitySourceRecord,
@@ -104,7 +104,7 @@ class SyncOrchestrator:
         return run_id
 
     def _window(self, request: SyncRequest) -> tuple[date, date]:
-        end = request.end or date.today()
+        end = request.end or local_today()
         if request.start:
             return request.start, end
         if request.mode == "backfill":

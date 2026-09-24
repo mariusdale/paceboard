@@ -10,10 +10,10 @@ the account's rate budget for no benefit.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Optional
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, local_today
 from ..db.session import session_scope
 from ..logging_conf import get_logger
 from ..analytics.service import recompute_derived
@@ -52,7 +52,7 @@ async def job_fast() -> None:
 async def job_daily() -> None:
     """Reconcile the last few days, refresh trends and account metadata."""
     settings = get_settings()
-    end = date.today()
+    end = local_today()
     await _guarded(
         "daily",
         SyncRequest(

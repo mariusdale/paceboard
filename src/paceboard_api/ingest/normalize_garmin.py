@@ -31,6 +31,7 @@ from ..db.models import (
 from ..logging_conf import get_logger
 from ..providers.dto import ProviderResult
 from .upsert import upsert
+from ..config import local_today
 
 log = get_logger("paceboard.normalize.garmin")
 
@@ -711,7 +712,7 @@ def lactate_threshold(session: Session, result: ProviderResult, raw_id: Optional
     payload = result.data
     if not isinstance(payload, dict):
         return 0
-    day = _as_date(payload.get("speed_hr_date")) or _requested_date(result) or date.today()
+    day = _as_date(payload.get("speed_hr_date")) or _requested_date(result) or local_today()
     written = 0
     written += _perf(session, "lactate_threshold_hr", day,
                      _num(payload.get("lactate_threshold_heart_rate_bpm")), units="bpm",
@@ -738,7 +739,7 @@ def cycling_ftp(session: Session, result: ProviderResult, raw_id: Optional[int])
     payload = result.data
     if not isinstance(payload, dict):
         return 0
-    day = _as_date(payload.get("calendar_date")) or _requested_date(result) or date.today()
+    day = _as_date(payload.get("calendar_date")) or _requested_date(result) or local_today()
     return _perf(session, "ftp", day,
                  _num(payload.get("functional_threshold_power_watts")), sport="ride",
                  units="W", context={"is_stale": payload.get("is_stale")}, raw_id=raw_id)
@@ -749,7 +750,7 @@ def race_predictions(session: Session, result: ProviderResult, raw_id: Optional[
     payload = result.data
     if not isinstance(payload, dict):
         return 0
-    day = _as_date(payload.get("prediction_date")) or date.today()
+    day = _as_date(payload.get("prediction_date")) or local_today()
     written = 0
     for label, entry in (payload.get("predictions") or {}).items():
         if not isinstance(entry, dict):
@@ -982,7 +983,7 @@ def personal_records(session: Session, result: ProviderResult, raw_id: Optional[
         # Garmin frequently returns a null date for a record. Store the row under
         # today so it is still queryable, but mark the date as unknown so the API
         # can report "not reported" instead of inventing the day it was set.
-        day = reported or date.today()
+        day = reported or local_today()
         record_type = str(entry.get("record_type") or entry.get("type_id") or "unknown")
         written += _perf(
             session, f"pr:{record_type}", day, _num(entry.get("raw_value")),

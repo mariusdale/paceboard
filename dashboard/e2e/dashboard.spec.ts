@@ -29,7 +29,10 @@ test.describe("Paceboard dashboard", () => {
     // --- Overview
     await expect(page.getByRole("heading", { name: "Your night, at a glance" })).toBeVisible();
     await expect(page.locator(".score-center > span")).toHaveText(/\d/);
-    await expect(page.locator(".vital")).toHaveCount(4);
+    await expect(page.locator(".vital")).toHaveCount(5);
+    const form = page.locator(".vital", { hasText: "Training form" });
+    await expect(form).toHaveAttribute("href", "/training");
+    await expect(form).toContainText(/this week/);
     await expect(page.getByRole("heading", { name: "Your rhythm over time" })).toBeVisible();
     await page.getByRole("button", { name: "HRV", exact: true }).click();
     await expect(page.getByRole("button", { name: "HRV", exact: true })).toHaveAttribute("aria-pressed", "true");

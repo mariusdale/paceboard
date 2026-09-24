@@ -60,6 +60,22 @@ def training_stress_balance(ctl: float, atl: float) -> float:
     return ctl - atl
 
 
+def ramp_rate(ctl: Sequence[Number], days: int = 7) -> Number:
+    """Change in fitness (CTL) over the last ``days``, in load units per week.
+
+        ramp = CTL[today] - CTL[today - days]
+
+    A sustained ramp above roughly 5-8 per week is the usual warning sign of
+    building load faster than the body adapts. Needs ``days + 1`` values.
+    """
+    if days <= 0 or len(ctl) < days + 1:
+        return None
+    latest, earlier = ctl[-1], ctl[-1 - days]
+    if latest is None or earlier is None:
+        return None
+    return latest - earlier
+
+
 def trimp_banister(
     duration_minutes: Number,
     avg_hr: Number,

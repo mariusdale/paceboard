@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import date, timedelta
+from datetime import timedelta
 
-from .config import get_settings
+from .config import get_settings, local_today
 from .logging_conf import configure_logging, get_logger
 
 log = get_logger("paceboard.cli")
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         _run_migrations()
         from .ingest.sync import SyncRequest, run_sync
 
-        end = date.today()
+        end = local_today()
         start = end - timedelta(days=args.days - 1) if args.days else None
         request = SyncRequest(
             providers=tuple(p.strip() for p in args.providers.split(",") if p.strip()),

@@ -364,7 +364,8 @@ class TestExport:
 
     def test_csv_export_has_a_header_and_rows(self, client, seeded):
         response = client.get("/api/v1/export.csv",
-                              params={"dataset": "daily_health", "days": 30})
+                              params={"dataset": "daily_health", "days": 30,
+                                      "end": "2026-08-31"})
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/csv")
         lines = response.text.strip().splitlines()
@@ -373,7 +374,8 @@ class TestExport:
 
     def test_json_export_carries_the_window(self, client, seeded):
         body = client.get("/api/v1/export.json",
-                          params={"dataset": "activities", "days": 30}).json()
+                          params={"dataset": "activities", "days": 30,
+                                  "end": "2026-08-31"}).json()
         assert body["dataset"] == "activities"
         assert body["range"]["end"]
         assert len(body["rows"]) == 12
@@ -554,3 +556,35 @@ class TestRecoveryHistory:
         assert body['today']['resting_hr'] is None
         assert body['latest_observations']['resting_hr'] == {'value': 49, 'day': yesterday.isoformat()}
         assert body['latest_observations']['training_readiness'] is None
+
+
+class TestLocalToday:
+    """'Today' follows the athlete's configured timezone, not the server clock."""
+
+    @pytest.mark.parametrize("zone", ["Pacific/Kiritimati", "Pacific/Pago_Pago"])
+    def test_today_uses_the_configured_timezone(self, settings, monkeypatch, zone):
+        from zoneinfo import ZoneInfo
+
+        from paceboard_api import config as config_module
+
+        monkeypatch.setenv("PACEBOARD_TIMEZONE", zone)
+        config_module.reset_settings_cache()
+        expected = datetime.now(ZoneInfo(zone)).date()
+        assert config_module.local_today() == expected
+        assert config_module.get_settings().today() == expected
+
+    def test_an_unknown_timezone_falls_back_to_utc(self, settings, monkeypatch):
+        from datetime import timezone
+
+        from paceboard_api import config as config_module
+
+        monkeypatch.setenv("PACEBOARD_TIMEZONE", "Not/AZone")
+        config_module.reset_settings_cache()
+        assert config_module.local_today() == datetime.now(timezone.utc).date()
+
+    def test_the_default_range_ends_on_the_local_day(self, client, monkeypatch):
+        from paceboard_api.api import deps
+
+        monkeypatch.setattr(deps, "local_today", lambda: date(2031, 1, 2))
+        body = client.get("/api/v1/export.json", params={"dataset": "activities", "days": 3}).json()
+        assert body["range"]["end"] == "2031-01-02"

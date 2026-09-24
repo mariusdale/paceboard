@@ -29,6 +29,7 @@ from ..db.models import (
     SyncWatermark,
 )
 from ..db.session import session_scope
+from ..config import local_today
 
 app = FastMCP("Paceboard")
 
@@ -42,7 +43,7 @@ def _dumps(payload: Any) -> str:
 
 def _window(start: Optional[str], end: Optional[str], default_days: int) -> tuple[date, date]:
     """Parse and bound a date window; raises ValueError on malformed input."""
-    resolved_end = date.fromisoformat(end) if end else date.today()
+    resolved_end = date.fromisoformat(end) if end else local_today()
     resolved_start = (
         date.fromisoformat(start) if start else resolved_end - timedelta(days=default_days - 1)
     )

@@ -172,3 +172,29 @@ export function daysAgo(count: number): string {
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/** A number with an explicit sign, e.g. "+3.2" or "-1.0". */
+export function signed(value: number | null | undefined, digits = 1): string | null {
+  if (!num(value)) return null;
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+/** Plain-language reading of Form (TSB = fitness - fatigue). */
+export function formNote(tsb: number | null | undefined): string {
+  if (tsb == null) return "";
+  if (tsb < -25) return "Deep fatigue";
+  if (tsb < -10) return "Building";
+  if (tsb < 5) return "Balanced";
+  if (tsb < 20) return "Fresh";
+  return "Very fresh — or detraining";
+}
+
+/** Plain-language reading of the weekly change in fitness (CTL). */
+export function rampNote(ramp: number | null | undefined): string {
+  if (ramp == null) return "";
+  if (ramp > 8) return "Steep build — watch recovery";
+  if (ramp > 5) return "Building quickly";
+  if (ramp >= 1) return "Building steadily";
+  if (ramp > -1) return "Holding steady";
+  return "Easing off";
+}

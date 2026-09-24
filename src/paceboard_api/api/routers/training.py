@@ -21,6 +21,9 @@ def load(session: SessionDep, window: DateRangeDep) -> dict[str, Any]:
         "ctl": "Exponentially weighted 42-day average of daily TRIMP",
         "atl": "Exponentially weighted 7-day average of daily TRIMP",
         "tsb": "CTL - ATL (form)",
+        "ramp_rate_7d": "CTL today - CTL 7 days ago (fitness change per week)",
+        "warmup": f"CTL/ATL are seeded from {analytics.LOAD_WARMUP_DAYS} days "
+                  "of history before the window",
         "daily_load": "Sum of Banister TRIMP per activity; falls back to Garmin "
                       "training load when heart rate is missing",
         "formula_version": analytics.F.FORMULA_VERSION,

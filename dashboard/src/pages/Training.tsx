@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type LoadSeries, type Metric, type RollingTotal, type VolumeBucket, type ZoneTotals } from "../lib/api";
 import { useUnits } from "../lib/hooks";
-import { dayLabel, distance, duration, elevation, hours, percent, round } from "../lib/format";
+import { dayLabel, distance, duration, elevation, formNote, hours, percent, rampNote, round, signed } from "../lib/format";
 import { CHART, ChartFrame, StackedBars, TimeChart, type SeriesSpec } from "../components/Charts";
 import { buildWeeklyVolume } from "../components/volume";
 import { Empty, Failed, Loading, Unavailable } from "../components/States";
@@ -83,6 +83,13 @@ export function Training() {
             value={round(series.tsb.at(-1), 1)}
             unit="au"
             note={formNote(series.tsb.at(-1))}
+          />
+          <Readout
+            label="Ramp rate"
+            value={signed(series.ramp_rate_7d, 1)}
+            unit="au/wk"
+            note={rampNote(series.ramp_rate_7d)}
+            unavailableReason={series.ramp_rate_7d == null ? "Needs a week of load history" : undefined}
           />
           <Readout
             label="Weekly load"
@@ -331,13 +338,4 @@ function PerformancePanel({ perf, loading }: { perf?: PerformanceResponse; loadi
       )}
     </section>
   );
-}
-
-function formNote(tsb: number | null | undefined): string {
-  if (tsb == null) return "";
-  if (tsb < -25) return "Deep fatigue";
-  if (tsb < -10) return "Building";
-  if (tsb < 5) return "Balanced";
-  if (tsb < 20) return "Fresh";
-  return "Very fresh — or detraining";
 }

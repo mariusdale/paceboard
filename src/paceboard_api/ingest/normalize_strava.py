@@ -9,7 +9,6 @@ Garmin's do.
 from __future__ import annotations
 
 import re
-from datetime import date
 from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
@@ -17,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..db.models import Athlete, Gear, HeartRateZoneSet, PerformanceMetric
 from ..providers.dto import ProviderResult
 from .upsert import upsert
+from ..config import local_today
 
 SOURCE = "strava"
 
@@ -138,7 +138,7 @@ def athlete_stats(session: Session, result: ProviderResult, raw_id: Optional[int
     payload = result.data
     if not isinstance(payload, dict):
         return 0
-    today = date.today()
+    today = local_today()
     written = 0
     for bucket, sport in (
         ("all_run_totals", "run"),
