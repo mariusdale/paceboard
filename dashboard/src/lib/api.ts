@@ -254,6 +254,7 @@ export interface Overview {
     latest_ctl: number | null;
     latest_atl: number | null;
     latest_tsb: number | null;
+    ramp_rate_7d: number | null;
   };
   weekly_volume: VolumeBucket[];
   rolling: RollingTotal[];
@@ -292,6 +293,7 @@ export interface LoadSeries {
   ctl: number[];
   atl: number[];
   tsb: number[];
+  ramp_rate_7d: number | null;
   garmin_acute: (number | null)[];
   garmin_chronic: (number | null)[];
   garmin_acwr: (number | null)[];

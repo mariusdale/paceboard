@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, local_today
 from ..db.session import db_session
 from .errors import bad_request
 
@@ -36,7 +36,7 @@ def date_range(
     days: int = Query(90, ge=1, le=MAX_RANGE_DAYS,
                       description="Window size when start/end are omitted"),
 ) -> DateRange:
-    resolved_end = end or date.today()
+    resolved_end = end or local_today()
     resolved_start = start or (resolved_end - timedelta(days=days - 1))
     if resolved_start > resolved_end:
         raise bad_request("start must be on or before end")

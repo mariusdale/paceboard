@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -121,6 +122,15 @@ class Settings:
         except (ZoneInfoNotFoundError, ValueError):
             return ZoneInfo("UTC")
 
+    def today(self) -> date:
+        """The calendar date in the athlete's timezone, not the server's.
+
+        The API often runs somewhere other than the athlete's wall clock (a
+        UTC container, a laptop that travelled), so "today" must come from the
+        configured timezone or late-evening data lands on the wrong day.
+        """
+        return datetime.now(self.tzinfo).date()
+
     @property
     def database_url(self) -> str:
         return f"sqlite+pysqlite:///{self.database_path}"
@@ -206,6 +216,11 @@ def build_settings() -> Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return build_settings()
+
+
+def local_today() -> date:
+    """Shorthand for ``get_settings().today()``."""
+    return get_settings().today()
 
 
 def reset_settings_cache() -> None:

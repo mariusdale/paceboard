@@ -11,10 +11,11 @@ Two shapes of output:
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,11 +38,15 @@ from ..db.models import (
 from ..ingest.activities import load_streams
 from ..logging_conf import get_logger
 from . import formulas as F
+from ..config import local_today
 
 log = get_logger("paceboard.analytics")
 
 CTL_DAYS = 42.0
 ATL_DAYS = 7.0
+#: History fed into CTL/ATL before a window starts. Three CTL time constants
+#: brings the seed within ~5% of its steady state.
+LOAD_WARMUP_DAYS = 126
 HRV_BASELINE_DAYS = 7
 RHR_BASELINE_DAYS = 28
 
@@ -138,6 +143,26 @@ def _resting_hr(session: Session, day: Optional[date] = None) -> Optional[int]:
     if day:
         stmt = stmt.where(DailyHealth.day <= day)
     return session.execute(stmt.order_by(DailyHealth.day.desc()).limit(1)).scalar()
+
+
+def _resting_hr_lookup(session: Session, end: date) -> Callable[[date], Optional[int]]:
+    """Load resting HR once and answer "latest value on or before *day*".
+
+    Equivalent to calling :func:`_resting_hr` per day, without a query each time.
+    """
+    rows = session.execute(
+        select(DailyHealth.day, DailyHealth.resting_hr)
+        .where(DailyHealth.resting_hr.isnot(None), DailyHealth.day <= end)
+        .order_by(DailyHealth.day)
+    ).all()
+    known_days = [row[0] for row in rows]
+    values = [row[1] for row in rows]
+
+    def lookup(day: date) -> Optional[int]:
+        position = bisect_right(known_days, day)
+        return values[position - 1] if position else None
+
+    return lookup
 
 
 def _ftp(session: Session) -> Optional[float]:
@@ -290,35 +315,47 @@ def load_series(
     days Garmin has no PMC entry for; Garmin's is passed through unchanged. The
     two are returned side by side rather than blended, because they use different
     load units and mixing them would be meaningless.
+
+    CTL and ATL are seeded from ``LOAD_WARMUP_DAYS`` of history before ``start``
+    so the first day shown already reflects prior training; without it, every
+    window would begin at zero fitness regardless of what came before.
     """
     days = date_series(start, end)
-    index = {day: i for i, day in enumerate(days)}
+    warmup_start = start - timedelta(days=LOAD_WARMUP_DAYS)
+    all_days = date_series(warmup_start, end)
+    index = {day: i for i, day in enumerate(all_days)}
 
-    daily_trimp = [0.0] * len(days)
+    daily_trimp = [0.0] * len(all_days)
     activities = session.execute(
         select(Activity).where(
-            Activity.start_time_utc >= datetime.combine(start, datetime.min.time()),
-            Activity.start_time_utc <= datetime.combine(end, datetime.max.time()),
+            Activity.start_time_utc >= datetime.combine(warmup_start - timedelta(days=1),
+                                                        datetime.min.time()),
+            Activity.start_time_utc <= datetime.combine(end + timedelta(days=1),
+                                                        datetime.max.time()),
         )
     ).scalars().all()
     max_hr = _max_hr(session)
     athlete = _athlete(session)
+    resting_hr_on = _resting_hr_lookup(session, end)
     for activity in activities:
         day = activity.local_date or activity.start_time_utc.date()
         if day not in index:
             continue
-        resting = _resting_hr(session, day)
         minutes = (activity.moving_duration_s or activity.duration_s or 0) / 60
-        value = F.trimp_banister(minutes, activity.avg_hr, resting, max_hr,
+        value = F.trimp_banister(minutes, activity.avg_hr, resting_hr_on(day), max_hr,
                                  athlete.sex if athlete else None)
         if value is None and activity.training_load:
             value = float(activity.training_load)
         if value:
             daily_trimp[index[day]] += value
 
-    ctl = F.exponential_load(daily_trimp, CTL_DAYS)
-    atl = F.exponential_load(daily_trimp, ATL_DAYS)
+    visible = slice(LOAD_WARMUP_DAYS, None)
+    ctl_all = F.exponential_load(daily_trimp, CTL_DAYS)
+    ctl = ctl_all[visible]
+    atl = F.exponential_load(daily_trimp, ATL_DAYS)[visible]
     tsb = [F.training_stress_balance(c, a) for c, a in zip(ctl, atl)]
+    daily_trimp = daily_trimp[visible]
+    ramp = F.ramp_rate(ctl_all)
 
     provider_rows = {
         row.day: row
@@ -334,6 +371,7 @@ def load_series(
         "ctl": [round(v, 2) for v in ctl],
         "atl": [round(v, 2) for v in atl],
         "tsb": [round(v, 2) for v in tsb],
+        "ramp_rate_7d": round(ramp, 2) if ramp is not None else None,
         "garmin_acute": [
             provider_rows[d].acute_load if d in provider_rows else None for d in days
         ],
@@ -374,7 +412,7 @@ def weekly_volume(
 
 
 def rolling_totals(session: Session, window_days: int, end: Optional[date] = None) -> dict[str, float]:
-    end = end or date.today()
+    end = end or local_today()
     start = end - timedelta(days=window_days - 1)
     row = session.execute(
         select(
@@ -397,7 +435,7 @@ def rolling_totals(session: Session, window_days: int, end: Optional[date] = Non
 
 
 def monotony_and_strain(session: Session, end: Optional[date] = None) -> dict[str, MetricValue]:
-    end = end or date.today()
+    end = end or local_today()
     start = end - timedelta(days=6)
     series = load_series(session, start, end)
     loads = series["daily_load"]
@@ -557,7 +595,7 @@ def recovery_series(session: Session, start: date, end: date) -> dict[str, Any]:
 
 
 def recovery_summary(session: Session, end: Optional[date] = None) -> dict[str, Any]:
-    end = end or date.today()
+    end = end or local_today()
     start = end - timedelta(days=59)
     series = recovery_series(session, start, end)
     sleep_seconds = series["sleep_seconds"]
@@ -630,7 +668,7 @@ def correlations(session: Session, end: Optional[date] = None, window_days: int 
     These are observational associations over a single athlete's history, not
     causal claims; the API returns the sample size so the UI can say so.
     """
-    end = end or date.today()
+    end = end or local_today()
     start = end - timedelta(days=window_days - 1)
     recovery = recovery_series(session, start, end)
     load = load_series(session, start, end)
@@ -667,7 +705,7 @@ def correlations(session: Session, end: Optional[date] = None, window_days: int 
 
 
 def consistency(session: Session, end: Optional[date] = None, window_days: int = 90) -> dict[str, Any]:
-    end = end or date.today()
+    end = end or local_today()
     start = end - timedelta(days=window_days - 1)
     active_days = {
         (row.local_date or row.start_time_utc.date())
@@ -735,7 +773,7 @@ def personal_records(session: Session) -> list[dict[str, Any]]:
 
 def recompute_derived(session: Session, days: int = 90) -> int:
     """Recalculate and persist the headline derived metrics. Idempotent."""
-    end = date.today()
+    end = local_today()
     start = end - timedelta(days=days - 1)
     written = 0
 

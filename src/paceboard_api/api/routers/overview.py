@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter
@@ -18,7 +18,7 @@ router = APIRouter(tags=["overview"])
 
 @router.get("/overview", response_model=dict, summary="Dashboard overview")
 def overview(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
-    today = date.today()
+    today = settings.today()
     window_start = today - timedelta(days=27)
 
     latest_health = session.execute(
@@ -50,7 +50,7 @@ def overview(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
 
     return {
         "latest_observations": observations,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": settings.timezone,
         "unit_system": settings.unit_system,
         "today": {
@@ -90,6 +90,7 @@ def overview(session: SessionDep, settings: SettingsDep) -> dict[str, Any]:
             "latest_ctl": load["ctl"][-1] if load["ctl"] else None,
             "latest_atl": load["atl"][-1] if load["atl"] else None,
             "latest_tsb": load["tsb"][-1] if load["tsb"] else None,
+            "ramp_rate_7d": load["ramp_rate_7d"],
         },
         "weekly_volume": analytics.weekly_volume(
             session, today - timedelta(days=55), today

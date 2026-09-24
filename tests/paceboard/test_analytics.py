@@ -42,6 +42,14 @@ class TestTrainingLoad:
     def test_zero_time_constant_is_rejected_rather_than_dividing_by_zero(self):
         assert F.exponential_load([100.0], 0) == []
 
+    def test_ramp_rate_is_the_weekly_change_in_fitness(self):
+        ctl = [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.5]
+        assert F.ramp_rate(ctl) == pytest.approx(7.5)
+
+    def test_ramp_rate_needs_a_full_week_of_history(self):
+        assert F.ramp_rate([10.0] * 7) is None
+        assert F.ramp_rate([10.0] * 8, days=0) is None
+
 
 class TestTrimp:
     def test_a_typical_session(self):
@@ -292,6 +300,37 @@ class TestLoadService:
         assert buckets
         assert {b["sport"] for b in buckets} == {"run", "ride"}
         assert all(b["count"] > 0 for b in buckets)
+
+    def test_fitness_carries_history_from_before_the_window(self, session):
+        # All history sits inside the short window's warm-up, so both windows
+        # must agree exactly on the days they share.
+        seed(session, days=120)
+        short = service.load_series(session, date(2026, 8, 25), date(2026, 8, 31))
+        long = service.load_series(session, date(2026, 3, 1), date(2026, 8, 31))
+        assert short["ctl"][0] > 0, "the first visible day must not restart from zero"
+        assert short["ctl"] == long["ctl"][-7:], "a window's values must not depend on its length"
+        assert short["atl"] == long["atl"][-7:]
+
+    def test_the_load_series_reports_a_ramp_rate(self, session):
+        seed(session)
+        series = service.load_series(session, date(2026, 8, 1), date(2026, 8, 31))
+        assert series["ramp_rate_7d"] is not None
+
+    def test_trimp_uses_the_resting_heart_rate_of_the_activity_day(self, session):
+        session.add(HeartRateZoneSet(source="garmin", sport="default", max_hr=190))
+        session.add(DailyHealth(source="garmin", day=date(2026, 8, 1), resting_hr=40))
+        session.add(DailyHealth(source="garmin", day=date(2026, 8, 10), resting_hr=60))
+        for day in (date(2026, 8, 5), date(2026, 8, 15)):
+            session.add(Activity(
+                canonical_key=f"garmin:{day}", primary_source="garmin", sport="run",
+                start_time_utc=datetime.combine(day, datetime.min.time()) + timedelta(hours=7),
+                local_date=day, duration_s=3600, moving_duration_s=3600, avg_hr=150,
+            ))
+        session.flush()
+        series = service.load_series(session, date(2026, 8, 1), date(2026, 8, 20))
+        expected = [F.trimp_banister(60, 150, 40, 190), F.trimp_banister(60, 150, 60, 190)]
+        assert series["daily_load"][4] == pytest.approx(expected[0], abs=0.05)
+        assert series["daily_load"][14] == pytest.approx(expected[1], abs=0.05)
 
     def test_monotony_reports_a_reason_when_the_week_is_empty(self, session):
         result = service.monotony_and_strain(session, date(2020, 1, 7))

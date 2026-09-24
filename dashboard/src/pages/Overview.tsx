@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type Overview as OverviewData, type RecoverySeries } from "../lib/api";
 import { useConnections, useTimezone, useUnits } from "../lib/hooks";
-import { dayLabel, distance, duration, elevation, hours, integer, localTime, round, sportLabel } from "../lib/format";
+import { dayLabel, distance, duration, elevation, formNote, hours, integer, localTime, round, signed, sportLabel } from "../lib/format";
 import { CHART, ChartFrame, Sparkline, StackedBars, TimeChart } from "../components/Charts";
 import { Empty, Failed, Loading } from "../components/States";
 import { buildWeeklyVolume } from "../components/volume";
@@ -81,6 +81,7 @@ export function Overview() {
       <Vital label="Overnight HRV" value={round(hrv, 0)} unit="ms" color="#6ce4bf" symbol="⌁" note={deviation == null ? "No baseline yet" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(1)}% vs your 7-night baseline`} values={recovery?.hrv_ms} />
       <Vital label="Resting heart rate" value={rhr?.value ?? today.resting_hr} unit="bpm" color="#ee91a5" symbol="♡" note={rhr ? `Latest measurement · ${rhr.day}` : "No recent resting heart rate"} values={recovery?.resting_hr} />
       <Vital label="Body Battery" value={battery?.value ?? today.body_battery_high} unit="/ 100" color="#efbf75" symbol="ϟ" note={battery ? `Daily high · ${battery.day}` : "No recent Body Battery measurement"} values={recovery?.body_battery_high} />
+      {hasLoad && <Vital to="/training" label="Training form" value={round(data.form.latest_tsb, 0)} unit="form" color="#5bcae5" symbol="◭" note={[formNote(data.form.latest_tsb), data.form.ramp_rate_7d == null ? null : `fitness ${signed(data.form.ramp_rate_7d, 1)} this week`].filter(Boolean).join(" · ")} values={data.form.tsb} />}
       {(readiness || today.training_readiness != null) && <Vital label="Training readiness" value={readiness?.value ?? today.training_readiness} unit="/ 100" color="#a5a2ff" symbol="◎" note={readiness ? `Latest measurement · ${readiness.day}` : today.readiness_level} values={recovery?.training_readiness} />}
     </div>
     <div className="overview-lower">
@@ -103,6 +104,6 @@ export function Overview() {
   </>;
 }
 
-function Vital({ label, value, unit, color, symbol, note, values }: { label: string; value: string | number | null | undefined; unit: string; color: string; symbol: string; note: string; values?: (number | null)[] }) {
-  return <Link to="/recovery" className="panel vital" style={{ "--vital-color": color } as CSSProperties}><div className="vital-label"><span className="vital-icon">{symbol}</span>{label}<span className="vital-arrow">↗</span></div><div className="vital-middle"><div className="vital-value">{value ?? "—"}<small>{unit}</small></div><div className="vital-spark">{values?.some(v => v != null) ? <Sparkline values={values.slice(-14)} color={color} height={42} /> : <span className="missing-line" />}</div></div><p>{note}</p></Link>;
+function Vital({ label, value, unit, color, symbol, note, values, to = "/recovery" }: { label: string; value: string | number | null | undefined; unit: string; color: string; symbol: string; note: string; values?: (number | null)[]; to?: string }) {
+  return <Link to={to} className="panel vital" style={{ "--vital-color": color } as CSSProperties}><div className="vital-label"><span className="vital-icon">{symbol}</span>{label}<span className="vital-arrow">↗</span></div><div className="vital-middle"><div className="vital-value">{value ?? "—"}<small>{unit}</small></div><div className="vital-spark">{values?.some(v => v != null) ? <Sparkline values={values.slice(-14)} color={color} height={42} /> : <span className="missing-line" />}</div></div><p>{note}</p></Link>;
 }

@@ -252,7 +252,7 @@ full list. The ones you are most likely to change:
 | `PACEBOARD_HOST` | `127.0.0.1` | API bind address; non-loopback is refused unless you opt in |
 | `PACEBOARD_API_PORT` | `8787` | REST API port |
 | `PACEBOARD_WEB_PORT` | `3000` | Dashboard port |
-| `PACEBOARD_TIMEZONE` | `Europe/Oslo` | Display timezone; storage is always UTC |
+| `PACEBOARD_TIMEZONE` | `Europe/Oslo` | Your timezone: sets what "today" means for default date windows and display; storage is always UTC |
 | `PACEBOARD_DATABASE_PATH` | `./data/paceboard.sqlite3` | Database location |
 | `PACEBOARD_BACKFILL_DAYS` | `90` | Initial backfill window |
 | `PACEBOARD_FAST_INTERVAL_MINUTES` | `15` | Cadence for today's health and recent activities |
@@ -355,8 +355,9 @@ individually unit-tested, and return `None` rather than a guess:
 
 | Metric | Formula | Needs |
 |---|---|---|
-| CTL / ATL | exponentially weighted 42-day / 7-day average of daily TRIMP | activities with HR |
+| CTL / ATL | exponentially weighted 42-day / 7-day average of daily TRIMP, seeded from 126 days of history before the window | activities with HR |
 | TSB (form) | CTL − ATL | the above |
+| Ramp rate | CTL today − CTL 7 days ago (fitness change per week) | the above |
 | TRIMP | Banister: `min × HRr × 0.64 × e^(k·HRr)` | avg HR, resting HR, max HR |
 | Monotony / strain | Foster: `mean/SD` over 7 days, `weekly load × monotony` | ≥ 3 training days |
 | Normalized power | Coggan: 30 s rolling average, 4th power, 4th root | ≥ 30 s of power |
